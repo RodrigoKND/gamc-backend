@@ -1,0 +1,428 @@
+// GAMC · Seguridad Ciudadana — ORM (Prisma 5)
+//
+// Espejo de `GAMC/database/schema.sql` (v2). Fuente de los tipos del cliente
+// y de las operaciones de datos. NOTA:
+//  · El DDL canónico (triggers, vistas, funciones, columnas GENERADAS y
+//    partial indexes) vive en `prisma/migrations/0001_init/migration.sql`
+//    (copia fiel del schema.sql). Prisma administra las tablas; lo demás
+//    se aplica una sola vez al crear la BD.
+//  · `user.nombre` y `guardia.nombre` son columnas GENERATED en la BD: por
+//    eso se excluyen aquí y las capas de datos las calculan/leen vía raw.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------ enums
+
+enum user_estado {
+  activo
+  inactivo
+  suspendido
+}
+
+enum guardia_estado {
+  pendiente_activacion
+  activo
+  inactivo
+  suspendido
+}
+
+enum guardia_estado_operativo {
+  fuera_de_servicio
+  en_servicio
+  emergencia
+}
+
+enum turno_estado {
+  en_servicio
+  finalizado
+  anulado
+}
+
+enum patrulla_estado {
+  asignada
+  en_curso
+  completada
+  cancelada
+}
+
+enum hecho_estado {
+  reportado
+  en_revision
+  cerrado
+}
+
+enum nivel_riesgo {
+  bajo
+  medio
+  alto
+  muy_alto
+}
+
+enum sujeto_auth {
+  user
+  guardia
+}
+
+enum evidencia_tipo {
+  foto
+  video
+}
+
+// ------------------------------------------------------ 2. catálogos
+
+model Epi {
+  id        String   @id @default(uuid())
+  codigo    String   @unique
+  nombre    String
+  poligono  Json?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  guardias          Guardia[]
+  rutas             RutaPlantilla[]
+  patrullas         Patrulla[]
+  hechoes           Hecho[]
+  zonaCriticas      ZonaCriticaActiva[]
+
+  @@map("epi")
+}
+
+model Role {
+  id          String  @id @default(uuid())
+  codigo      String  @unique
+  nombre      String
+  descripcion String?
+
+  users            User[]
+  rolePermissions  RolePermission[]
+
+  @@map("role")
+}
+
+model RolePermission {
+  id            String @id @default(uuid())
+  roleId        String @map("role_id") @db.Uuid
+  recurso       String
+  puedeVer      Boolean @default(false) @map("puede_ver")
+  puedeCrear    Boolean @default(false) @map("puede_crear")
+  puedeEditar   Boolean @default(false) @map("puede_editar")
+  puedeEliminar Boolean @default(false) @map("puede_eliminar")
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, recurso])
+  @@map("role_permission")
+}
+
+model TipoHecho {
+  id     String  @id @default(uuid())
+  codigo String  @unique
+  label  String
+  activo Boolean @default(true)
+  orden  Int     @default(100)
+
+  hechoes Hecho[]
+
+  @@map("tipo_hecho")
+}
+
+// ------------------------------------------------------ 3. usuarios y sesión
+
+model User {
+  id                  String    @id @default(uuid())
+  roleId              String    @map("role_id") @db.Uuid
+  primerNombre        String    @map("primer_nombre")
+  segundoNombre       String?   @map("segundo_nombre")
+  apellidoPaterno     String    @map("apellido_paterno")
+  apellidoMaterno     String    @map("apellido_materno")
+  email               String    @unique
+  usuario             String    @unique
+  ci                  String?   @unique
+  telefono            String?
+  fechaNacimiento     DateTime? @map("fecha_nacimiento") @db.Date
+  passwordHash        String    @map("password_hash")
+  estado              user_estado @default(activo)
+  debeCambiarPassword Boolean   @default(true) @map("debe_cambiar_password")
+  creadoPorId         String?   @map("creado_por") @db.Uuid
+  ultimoLogin         DateTime? @map("ultimo_login") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  role                Role              @relation(fields: [roleId], references: [id])
+  creadoPor           User?             @relation("UserCreado", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  creados             User[]            @relation("UserCreado")
+  guardiasCreados     Guardia[]         @relation("GuardiaCreada")
+  rutasCreadas        RutaPlantilla[]   @relation("RutaCreada")
+  patrullasAsignadas  Patrulla[]        @relation("PatrullaAsignada")
+  hechosEstado        Hecho[]           @relation("HechoEstado")
+  sosAtendidos        GuardiaTelemetria[] @relation("SosAtendido")
+  auditLogs           AuditLog[]        @relation("AuditActor")
+
+  @@map("user")
+}
+
+model Guardia {
+  id                  String                  @id @default(uuid())
+  epiId               String?                 @map("epi_id") @db.Uuid
+  primerNombre        String                  @map("primer_nombre")
+  segundoNombre       String?                 @map("segundo_nombre")
+  apellidoPaterno     String                  @map("apellido_paterno")
+  apellidoMaterno     String                  @map("apellido_materno")
+  ci                  String                  @unique
+  usuario             String                  @unique
+  passwordHash        String?                 @map("password_hash")
+  telefono            String
+  fotoUrl             String?                 @map("foto_url")
+  fechaNacimiento     DateTime                @map("fecha_nacimiento") @db.Date
+  estado              guardia_estado          @default(pendiente_activacion)
+  estadoOperativo     guardia_estado_operativo @default(fuera_de_servicio) @map("estado_operativo")
+  activacionToken     String?                 @map("activacion_token")
+  activacionExpira    DateTime?               @map("activacion_expira") @db.Timestamptz(6)
+  debeCambiarPassword Boolean                 @default(true) @map("debe_cambiar_password")
+  creadoPorId         String                  @map("creado_por") @db.Uuid
+  activadoEn          DateTime?               @map("activado_en") @db.Timestamptz(6)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  epi       Epi?    @relation(fields: [epiId], references: [id], onDelete: SetNull)
+  creadoPor User    @relation("GuardiaCreada", fields: [creadoPorId], references: [id])
+  turnos    Turno[]
+  patrullas Patrulla[]
+  hechoes   Hecho[]
+  telemetrias GuardiaTelemetria[]
+  mandados  Mandado[]
+
+  @@map("guardia")
+}
+
+model PasswordReset {
+  id          String      @id @default(uuid())
+  sujetoTipo  sujeto_auth @map("sujeto_tipo")
+  sujetoId    String      @map("sujeto_id")
+  codigoHash  String      @map("codigo_hash")
+  expiraEn    DateTime    @map("expira_en") @db.Timestamptz(6)
+  usado       Boolean     @default(false)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("password_reset")
+}
+
+model RefreshToken {
+  id               String      @id @default(uuid())
+  sujetoTipo       sujeto_auth @map("sujeto_tipo")
+  sujetoId         String      @map("sujeto_id")
+  tokenHash        String      @unique @map("token_hash")
+  familia          String
+  expiraEn         DateTime    @map("expira_en") @db.Timestamptz(6)
+  revocada         Boolean     @default(false)
+  reemplazadaPorId String?     @map("reemplazada_por") @db.Uuid
+  ip               String?     @db.VarChar(64)
+  userAgent        String?     @map("user_agent")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  usedAt           DateTime?   @map("used_at") @db.Timestamptz(6)
+
+  @@map("refresh_token")
+}
+
+// ------------------------------------------------------ 4. patrullaje
+
+model RutaPlantilla {
+  id          String   @id @default(uuid())
+  nombre      String
+  descripcion String?
+  epiId       String?  @map("epi_id") @db.Uuid
+  trazado     Json?
+  activo      Boolean  @default(true)
+  creadoPorId String?  @map("creado_por") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  epi       Epi?      @relation(fields: [epiId], references: [id], onDelete: SetNull)
+  creadoPor User?     @relation("RutaCreada", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  patrullas Patrulla[]
+
+  @@map("ruta_plantilla")
+}
+
+model Patrulla {
+  id                 String          @id @default(uuid())
+  guardiaId          String          @map("guardia_id") @db.Uuid
+  rutaPlantillaId    String?         @map("ruta_plantilla_id") @db.Uuid
+  epiId              String?         @map("epi_id") @db.Uuid
+  asignadoPorId      String          @map("asignado_por") @db.Uuid
+  estado             patrulla_estado @default(asignada)
+  fecha              DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
+  horaInicioPrevista DateTime?       @map("hora_inicio_prevista") @db.Time(0)
+  notas              String?
+  nombre             String?
+  descripcion        String?
+  poligonoGeojson    Json?           @map("poligono_geojson")
+  turnoId            String?         @map("turno_id") @db.Uuid
+  iniciadaEn         DateTime?       @map("iniciada_en") @db.Timestamptz(6)
+  completadaEn       DateTime?       @map("completada_en") @db.Timestamptz(6)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  guardia       Guardia       @relation(fields: [guardiaId], references: [id])
+  rutaPlantilla RutaPlantilla? @relation(fields: [rutaPlantillaId], references: [id], onDelete: SetNull)
+  epi           Epi?          @relation(fields: [epiId], references: [id], onDelete: SetNull)
+  asignadoPor   User          @relation("PatrullaAsignada", fields: [asignadoPorId], references: [id])
+  turno         Turno?        @relation("PatrullaTurno", fields: [turnoId], references: [id])
+  turnosTurno   Turno[]       @relation("TurnoPatrullaRef")
+
+  @@map("patrulla")
+}
+
+// ------------------------------------------------------ 5. operación en campo
+
+model Turno {
+  id               String       @id @default(uuid())
+  guardiaId        String       @map("guardia_id") @db.Uuid
+  patrullaId       String?      @map("patrulla_id") @db.Uuid
+  estado           turno_estado @default(en_servicio)
+  selfieInicioUrl  String       @map("selfie_inicio_url")
+  latInicio        Float        @map("lat_inicio")
+  lngInicio        Float        @map("lng_inicio")
+  horainicio       DateTime     @map("hora_inicio") @db.Timestamptz(6)
+  latFin           Float?       @map("lat_fin")
+  lngFin           Float?       @map("lng_fin")
+  horaFin          DateTime?    @map("hora_fin") @db.Timestamptz(6)
+  distanciaMetros  Decimal      @default(0) @map("distancia_metros") @db.Decimal(12, 2)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  guardia     Guardia           @relation(fields: [guardiaId], references: [id])
+  patrulla    Patrulla?         @relation("TurnoPatrullaRef", fields: [patrullaId], references: [id])
+  patrullasEnTurno Patrulla[]   @relation("PatrullaTurno")
+  telemetrias GuardiaTelemetria[]
+  hechoes     Hecho[]
+  mandados    Mandado[]
+
+  @@map("turno")
+}
+
+model GuardiaTelemetria {
+  id                BigInt     @id @default(autoincrement()) @db.BigInt
+  guardiaId         String     @map("guardia_id") @db.Uuid
+  turnoId           String?    @map("turno_id") @db.Uuid
+  lat               Float
+  lng               Float
+  precisionM        Decimal?   @map("precision_m") @db.Decimal(8, 2)
+  velocidadMps      Decimal?   @map("velocidad_mps") @db.Decimal(8, 2)
+  bateriaPct        Int?       @map("bateria_pct")
+  esSos             Boolean    @default(false) @map("es_sos")
+  sosEstado         String?    @map("sos_estado")
+  sosAtendidoPorId  String?    @map("sos_atendido_por") @db.Uuid
+  sosAtendidoEn     DateTime?  @map("sos_atendido_en") @db.Timestamptz(6)
+  capturadoEn       DateTime   @map("capturado_en") @db.Timestamptz(6)
+  recibidoEn        DateTime   @default(now()) @map("recibido_en") @db.Timestamptz(6)
+
+  guardia       Guardia @relation(fields: [guardiaId], references: [id])
+  turno         Turno?  @relation(fields: [turnoId], references: [id], onDelete: SetNull)
+  sosAtendidoPor User?  @relation("SosAtendido", fields: [sosAtendidoPorId], references: [id], onDelete: SetNull)
+
+  @@map("guardia_telemetria")
+}
+
+model Hecho {
+  id                   String       @id @default(uuid())
+  turnoId              String?      @map("turno_id") @db.Uuid
+  guardiaId            String       @map("guardia_id") @db.Uuid
+  tipoHechoId          String       @map("tipo_hecho_id") @db.Uuid
+  descripcion          String
+  nivelRiesgo          nivel_riesgo @map("nivel_riesgo")
+  lat                  Float
+  lng                  Float
+  epiId                String?      @map("epi_id") @db.Uuid
+  direccion            String?
+  ocurridoEn           DateTime     @map("ocurrido_en") @db.Timestamptz(6)
+  reportadoEn          DateTime     @default(now()) @map("reportado_en") @db.Timestamptz(6)
+  estado               hecho_estado @default(reportado)
+  estadoCambiadoPorId  String?      @map("estado_cambiado_por") @db.Uuid
+  estadoCambiadoEn     DateTime?    @map("estado_cambiado_en") @db.Timestamptz(6)
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  turno             Turno?      @relation(fields: [turnoId], references: [id], onDelete: SetNull)
+  guardia           Guardia     @relation(fields: [guardiaId], references: [id])
+  tipoHecho         TipoHecho   @relation(fields: [tipoHechoId], references: [id])
+  epi               Epi?        @relation(fields: [epiId], references: [id], onDelete: SetNull)
+  estadoCambiadoPor User?       @relation("HechoEstado", fields: [estadoCambiadoPorId], references: [id], onDelete: SetNull)
+  evidencias        HechoEvidencia[]
+
+  @@map("hecho")
+}
+
+model HechoEvidencia {
+  id        String        @id @default(uuid())
+  hechoId   String        @map("hecho_id") @db.Uuid
+  url       String
+  tipo      evidencia_tipo @default(foto)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  hecho Hecho @relation(fields: [hechoId], references: [id], onDelete: Cascade)
+
+  @@map("hecho_evidencia")
+}
+
+model Mandado {
+  id          String   @id @default(uuid())
+  turnoId     String   @map("turno_id") @db.Uuid
+  guardiaId   String   @map("guardia_id") @db.Uuid
+  descripcion String
+  lat         Float
+  lng         Float
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  turno   Turno   @relation(fields: [turnoId], references: [id], onDelete: Cascade)
+  guardia Guardia @relation(fields: [guardiaId], references: [id])
+
+  @@map("mandado")
+}
+
+// ------------------------------------------------------ 6. derivados / auditoría
+
+model ZonaCriticaActiva {
+  id             String       @id @default(uuid())
+  epiId          String?      @map("epi_id") @db.Uuid
+  centroLat      Float        @map("centro_lat")
+  centroLng      Float        @map("centro_lng")
+  radioM         Decimal?     @map("radio_m") @db.Decimal(10, 2)
+  poligono       Json?
+  direccion      String?
+  cantidadHechos Int          @map("cantidad_hechos")
+  nivelRiesgo    nivel_riesgo @map("nivel_riesgo")
+  ventanaDesde   DateTime     @map("ventana_desde") @db.Timestamptz(6)
+  ventanaHasta   DateTime     @map("ventana_hasta") @db.Timestamptz(6)
+  vigente        Boolean      @default(true)
+  calculadaEn    DateTime     @default(now()) @map("calculada_en") @db.Timestamptz(6)
+
+  epi Epi? @relation(fields: [epiId], references: [id], onDelete: SetNull)
+
+  @@map("zona_critica_activa")
+}
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actorTipo   String   @default("user") @map("actor_tipo")
+  accion      String
+  recurso     String?
+  recursoId   String?  @map("recurso_id")
+  detalle     Json?
+  ip          String?  @db.VarChar(64)
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actorUser User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@map("audit_log")
+}

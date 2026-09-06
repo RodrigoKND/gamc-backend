@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────
+# GAMC API — archivos que NUNCA se suben a git
+# ─────────────────────────────────────────────────────────────
+
+# Variables de entorno — secretos reales (DB, JWT, CORS). Solo se
+# versiona .env.example (con placeholders).
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+!.env.example
+
+# Dependencias
+node_modules/
+
+# Compilación / build
+dist/
+build/
+*.tsbuildinfo
+
+# Prisma — el schema SI se versiona (prisma/schema.prisma), la BD no.
+prisma/*.db
+prisma/*.db-journal
+
+# Logs / debug
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+.vite/
+
+# Editor / IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# SonarQube / análisis
+.scannerwork/
+
+# Certificados y claves (nunca en repos)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Secretos locales de cualquier herramienta
+*.secret
+*.token

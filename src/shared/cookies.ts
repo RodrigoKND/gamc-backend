@@ -1,0 +1,77 @@
+import type { Response } from 'express';
+import type { AuthenticatedPrincipal } from '@modules/auth/application/auth.types';
+import { env } from '@config/env';
+
+// Nombres y manejo de cookies de sesión. Los dos accesos (JWT) son
+// httpOnly: el navegador nunca los expone a JS. `gamc_profile` es la única
+// cookie legible por el cliente (sin secretos) que la web usa para el
+// Sidebar/Topbar y el routing del middleware. `gamc_xsrf` es el token
+// anti-CSRF de doble envío (se valida como header en mutaciones).
+
+export const COOKIES = {
+  access: 'gamc_access',
+  refresh: 'gamc_refresh',
+  profile: 'gamc_profile',
+  xsrf: 'gamc_xsrf',
+} as const;
+
+const BASE_OPTIONS = {
+  httpOnly: false,
+  secure: env.COOKIE_SECURE,
+  sameSite: 'lax' as const,
+  path: '/',
+};
+
+// El refresh solo viaja hacia /api/auth/refresh — si un script intenta
+// usarlo en otro endpoint, la cookie simplemente no se envía.
+const REFRESH_OPTIONS = {
+  httpOnly: true,
+  secure: env.COOKIE_SECURE,
+  sameSite: 'lax' as const,
+  path: '/api/auth/refresh',
+  maxAge: env.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+};
+
+const ACCESS_OPTIONS = {
+  httpOnly: true,
+  secure: env.COOKIE_SECURE,
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: env.ACCESS_TOKEN_MINUTES * 60 * 1000,
+};
+
+function serializeProfile(user: AuthenticatedPrincipal): string {
+  return JSON.stringify({
+    identifier: user.identifier,
+    name: user.name,
+    role: user.role,
+  });
+}
+
+export interface SessionLike {
+  accessToken: string;
+  refreshToken: string;
+  principal: AuthenticatedPrincipal;
+  xsrf: string;
+}
+
+export function setSessionCookies(res: Response, session: SessionLike, xsrf: string): void {
+  res.cookie(COOKIES.access, session.accessToken, ACCESS_OPTIONS);
+  res.cookie(COOKIES.refresh, session.refreshToken, REFRESH_OPTIONS);
+  res.cookie(COOKIES.profile, serializeProfile(session.principal), {
+    ...BASE_OPTIONS,
+    maxAge: env.ACCESS_TOKEN_MINUTES * 60 * 1000,
+  });
+  // No httpOnly de propósito: la web necesita leerla para mandar el header.
+  res.cookie(COOKIES.xsrf, xsrf, {
+    ...BASE_OPTIONS,
+    maxAge: env.ACCESS_TOKEN_MINUTES * 60 * 1000,
+  });
+}
+
+export function clearSessionCookies(res: Response): void {
+  res.clearCookie(COOKIES.access, { ...ACCESS_OPTIONS, maxAge: undefined });
+  res.clearCookie(COOKIES.refresh, { ...REFRESH_OPTIONS, maxAge: undefined });
+  res.clearCookie(COOKIES.profile, { ...BASE_OPTIONS, maxAge: undefined });
+  res.clearCookie(COOKIES.xsrf, { ...BASE_OPTIONS, maxAge: undefined });
+}
