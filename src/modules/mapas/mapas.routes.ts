@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/middlewares';
+import { recorridoQuery } from '@modules/turnos/turnos.service';
 import {
   asignarPatrulla,
   patrullasVigentes,
@@ -54,6 +55,22 @@ export function buildMapasRouter(tokens: TokenService): Router {
     authorize('mapas', 'ver'),
     asyncHandler(async (_req, res) => {
       res.json({ data: await zonasCriticas() });
+    }),
+  );
+
+  // Recorrido real: por turno, o por guardia + ventana temporal.
+  router.get(
+    '/recorrido',
+    authorize('mapas', 'ver'),
+    asyncHandler(async (req, res) => {
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+      const data = await recorridoQuery({
+        turnoId: str(req.query.turnoId),
+        guardiaId: str(req.query.guardiaId),
+        desde: str(req.query.desde),
+        hasta: str(req.query.hasta),
+      });
+      res.json({ data });
     }),
   );
 

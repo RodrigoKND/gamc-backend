@@ -1,6 +1,7 @@
 import type { AuthRepository, NewRefreshToken } from '@modules/auth/domain/auth.repository';
 import type {
   GuardiaCredentialRow,
+  GuardiaProfileRow,
   RefreshTokenRecord,
   RolePermissionRow,
   UserCredentialRow,
@@ -40,6 +41,14 @@ export class InMemoryAuthRepository implements AuthRepository {
   }
 
   async findGuardiaById(_id: string): Promise<GuardiaCredentialRow | null> {
+    return null;
+  }
+
+  async findGuardiaProfileById(_id: string): Promise<GuardiaProfileRow | null> {
+    return null;
+  }
+
+  async activateGuardiaWithToken(): Promise<GuardiaCredentialRow | null> {
     return null;
   }
 

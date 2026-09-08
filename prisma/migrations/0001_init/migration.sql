@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- GAMC Â· Seguridad Ciudadana â€” Base de datos ÃšNICA (app mÃ³vil + plataforma web)
 -- PostgreSQL 14+   Â·   snake_case Â· PK uuid Â· timestamptz UTC (ISO-8601)
 -- PolÃ­gonos/trazados: jsonb [[lng,lat], ...] (WGS84). Ver NOTA PostGIS en el .md.
@@ -97,7 +97,7 @@ create table "user" (
   apellido_paterno      text not null,
   apellido_materno      text not null,
   nombre                text not null generated always as
-                        (trim(concat_ws(' ', primer_nombre, segundo_nombre, apellido_paterno, apellido_materno))) stored,
+                        (trim(both ' ' from regexp_replace(coalesce(primer_nombre, '') || ' ' || coalesce(segundo_nombre, '') || ' ' || coalesce(apellido_paterno, '') || ' ' || coalesce(apellido_materno, ''), '\s+', ' ', 'g'))) stored,
   email                 text not null unique,
   usuario               text not null unique,
   ci                    text unique,                       -- carnÃ© de identidad (web)
@@ -124,7 +124,7 @@ create table guardia (
   apellido_paterno      text not null,
   apellido_materno      text not null,
   nombre                text not null generated always as
-                        (trim(concat_ws(' ', primer_nombre, segundo_nombre, apellido_paterno, apellido_materno))) stored,
+                        (trim(both ' ' from regexp_replace(coalesce(primer_nombre, '') || ' ' || coalesce(segundo_nombre, '') || ' ' || coalesce(apellido_paterno, '') || ' ' || coalesce(apellido_materno, ''), '\s+', ' ', 'g'))) stored,
   ci                    text not null unique,
   usuario               text not null unique,
   password_hash         text,                              -- null hasta la activaciÃ³n
@@ -350,12 +350,14 @@ create index ix_audit_actor   on audit_log (actor_user_id, created_at desc);
 
 -- 7.1 updated_at automÃ¡tico
 create or replace function set_updated_at() returns trigger as $$
+begin
   new.updated_at = now();
   return new;
 end $$ language plpgsql;
 
 do $$
 declare t text;
+begin
   foreach t in array array['epi','"user"','guardia','ruta_plantilla','patrulla','turno','hecho']
   loop
     execute format(
@@ -367,6 +369,7 @@ end $$;
 
 -- 7.2 audit_log inmutable
 create or replace function audit_log_inmutable() returns trigger as $$
+begin
   raise exception 'audit_log es inmutable: % no permitido', tg_op;
 end $$ language plpgsql;
 create trigger trg_audit_no_update before update or delete on audit_log
@@ -470,7 +473,7 @@ insert into epi (codigo, nombre) values
 insert into tipo_hecho (codigo, label, orden) values
   ('robo','Robo',10), ('asalto','Asalto',20), ('atraco','Atraco',30),
   ('hurto','Hurto',40), ('violencia','Violencia',50), ('emergencia','Emergencia',60),
-  ('robo_vehÃ­culo','Robo de VehÃ­culo',70), ('robo_domicilio','Robo a Domicilio',80),
+  ('robo_vehículo','Robo de Vehículo',70), ('robo_domicilio','Robo a Domicilio',80),
   ('accidente','Accidente',90), ('disturbio','Disturbio',100),
   ('vandalismo','Vandalismo',110), ('otro','Otro',999);
 
