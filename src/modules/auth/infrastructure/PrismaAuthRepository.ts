@@ -3,6 +3,7 @@ import { Tx } from '@infra/database';
 import { nombreCompleto } from '@shared/names';
 import type {
   GuardiaCredentialRow,
+  GuardiaProfileRow,
   PasswordResetRecord,
   RefreshTokenRecord,
   RolePermissionRow,
@@ -67,6 +68,55 @@ export class PrismaAuthRepository implements AuthRepository {
     const row = await this.client.guardia.findUnique({ where: { id } });
     if (!row) return null;
     return this.toGuardiaRow(row);
+  }
+
+  async findGuardiaProfileById(id: string): Promise<GuardiaProfileRow | null> {
+    const row = await this.client.guardia.findUnique({
+      where: { id },
+      include: { epi: { select: { codigo: true, nombre: true } } },
+    });
+    if (!row) return null;
+    return {
+      id: row.id,
+      usuario: row.usuario,
+      nombre: nombreCompleto(row),
+      ci: row.ci,
+      telefono: row.telefono,
+      fotoUrl: row.fotoUrl,
+      estado: GUARDIA_ESTADO_MAP[row.estado as keyof typeof GUARDIA_ESTADO_MAP] ?? 'pendiente_activacion',
+      estadoOperativo: row.estadoOperativo as GuardiaProfileRow['estadoOperativo'],
+      debeCambiarPassword: row.debeCambiarPassword,
+      epiId: row.epiId,
+      epiCodigo: row.epi?.codigo ?? null,
+      epiNombre: row.epi?.nombre ?? null,
+    };
+  }
+
+  async activateGuardiaWithToken(
+    usuario: string,
+    activacionToken: string,
+    passwordHash: string,
+  ): Promise<GuardiaCredentialRow | null> {
+    // Update condicional (BD_UNIFICADA §5): solo aplica si usuario+token
+    // coinciden, el token sigue vigente y la cuenta está pendiente.
+    const res = await this.client.guardia.updateMany({
+      where: {
+        usuario: { equals: usuario, mode: 'insensitive' },
+        activacionToken,
+        activacionExpira: { gt: new Date() },
+        estado: 'pendiente_activacion',
+      },
+      data: {
+        passwordHash,
+        estado: 'activo',
+        activadoEn: new Date(),
+        activacionToken: null,
+        activacionExpira: null,
+        debeCambiarPassword: false,
+      },
+    });
+    if (res.count === 0) return null;
+    return this.findGuardiaByIdentifier(usuario);
   }
 
   async findRoleById(roleId: string): Promise<{ codigo: string } | null> {
@@ -137,8 +187,8 @@ export class PrismaAuthRepository implements AuthRepository {
     return 'ok';
   }
 
-  async createRefreshToken(newToken: NewRefreshToken): Promise<void> {
-    await this.client.refreshToken.create({
+  async createRefreshToken(newToken: NewRefreshToken, tx?: Tx): Promise<void> {
+    await (tx ?? this.client).refreshToken.create({
       data: {
         id: newToken.id,
         sujetoTipo: newToken.sujetoTipo,
@@ -166,8 +216,8 @@ export class PrismaAuthRepository implements AuthRepository {
     };
   }
 
-  async rotateRefreshToken(revokedId: string, replacementId: string): Promise<void> {
-    await this.client.refreshToken.update({
+  async rotateRefreshToken(revokedId: string, replacementId: string, tx?: Tx): Promise<void> {
+    await (tx ?? this.client).refreshToken.update({
       where: { id: revokedId },
       data: { revocada: true, reemplazadaPorId: replacementId, usedAt: new Date() },
     });

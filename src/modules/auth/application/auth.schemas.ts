@@ -34,3 +34,27 @@ export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(200),
   newPassword: passwordSchema,
 });
+
+// ── Auth móvil (guardias) ────────────────────────────────────────────────────
+// La app manda el token en el body y lo recibe en el JSON (no cookies).
+
+export const guardiaLoginSchema = z.object({
+  usuario: z.string().trim().min(3).max(120),
+  password: z.string().min(1).max(200),
+});
+
+/** `activacion_token` es el nombre canónico (BD_UNIFICADA §5); el controller
+ *  también acepta `activacionToken` y lo normaliza antes de validar. */
+export const activarGuardiaSchema = z.object({
+  usuario: z.string().trim().min(3).max(120),
+  activacion_token: z.string().trim().min(10).max(255),
+  password: passwordSchema,
+});
+
+export const mobileRefreshSchema = z.object({
+  refreshToken: z.string().min(20).max(500),
+});
+
+export const mobileLogoutSchema = z.object({
+  refreshToken: z.string().min(20).max(500).optional(),
+});

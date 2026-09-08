@@ -4,9 +4,13 @@ import { COOKIES, clearSessionCookies, setSessionCookies } from '@shared/cookies
 import type { AuthSessionMetadata } from '../application/auth.types.js';
 import type { AuthService } from '../application/auth.service.js';
 import {
+  activarGuardiaSchema,
   changePasswordSchema,
   confirmRecoverySchema,
+  guardiaLoginSchema,
   loginSchema,
+  mobileLogoutSchema,
+  mobileRefreshSchema,
   requestRecoverySchema,
 } from '../application/auth.schemas.js';
 import type { AuthRequest } from './middlewares.js';
@@ -45,15 +49,77 @@ export interface AuthController {
   requestRecovery: ReturnType<typeof ah>;
   confirmRecovery: ReturnType<typeof ah>;
   changePassword: ReturnType<typeof ah>;
+  // Auth móvil (guardias) — tokens en el body, sin cookies.
+  activar: ReturnType<typeof ah>;
+  loginMobile: ReturnType<typeof ah>;
+  refreshMobile: ReturnType<typeof ah>;
+  logoutMobile: ReturnType<typeof ah>;
+  meMobile: ReturnType<typeof ah>;
+}
+
+/** Normaliza `activacionToken` → `activacion_token` (aceptamos ambos nombres). */
+function normalizeActivationBody(body: unknown): unknown {
+  if (body && typeof body === 'object') {
+    const b = body as Record<string, unknown>;
+    if (b.activacion_token == null && typeof b.activacionToken === 'string') {
+      b.activacion_token = b.activacionToken;
+    }
+  }
+  return body;
 }
 
 export function createAuthController(service: AuthService): AuthController {
   return {
     login: ah(async (req, res) => {
+      // BD_UNIFICADA: si el body trae `tipo: "guardia"`, es login de la app
+      // móvil → validar contra la tabla `guardia` y responder tokens en el JSON.
+      const tipo = (req.body as { tipo?: unknown } | undefined)?.tipo;
+      if (tipo === 'guardia') {
+        const { usuario, password } = validate(guardiaLoginSchema, req.body);
+        const result = await service.loginGuardia(usuario, password, sessionMeta(req));
+        res.json({ data: result });
+        return;
+      }
       const { identifier, password } = validate(loginSchema, req.body);
       const session = await service.login(identifier, password, sessionMeta(req));
       setSessionCookies(res, session, session.xsrf);
       res.json({ data: { principal: publicPrincipal(session.principal) } });
+    }),
+
+    loginMobile: ah(async (req, res) => {
+      const { usuario, password } = validate(guardiaLoginSchema, req.body);
+      const result = await service.loginGuardia(usuario, password, sessionMeta(req));
+      res.json({ data: result });
+    }),
+
+    activar: ah(async (req, res) => {
+      const { usuario, activacion_token, password } = validate(
+        activarGuardiaSchema,
+        normalizeActivationBody(req.body),
+      );
+      const result = await service.activarGuardia(
+        { usuario, activacionToken: activacion_token, password },
+        sessionMeta(req),
+      );
+      res.json({ data: result });
+    }),
+
+    refreshMobile: ah(async (req, res) => {
+      const { refreshToken } = validate(mobileRefreshSchema, req.body);
+      const result = await service.refreshGuardia(refreshToken, sessionMeta(req));
+      res.json({ data: result });
+    }),
+
+    logoutMobile: ah(async (req, res) => {
+      const { refreshToken } = validate(mobileLogoutSchema, req.body);
+      await service.logout(refreshToken);
+      res.json({ data: { ok: true } });
+    }),
+
+    meMobile: ah(async (req: AuthRequest, res) => {
+      if (!req.principal) throw Errors.auth();
+      const guardia = await service.getGuardiaProfile(req.principal.id);
+      res.json({ data: { guardia } });
     }),
 
     logout: ah(async (req, res) => {

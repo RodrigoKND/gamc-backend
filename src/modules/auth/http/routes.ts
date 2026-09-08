@@ -40,6 +40,7 @@ export function buildAuthRouter(service: AuthService, tokens: TokenService): Rou
   });
 
   router.post('/login', loginLimiter, ctrl.login);
+  router.post('/activar', loginLimiter, ctrl.activar); // guardia · primer login (BD_UNIFICADA §5)
   router.post('/logout', csrfGuard, ctrl.logout);
   router.post('/refresh', ctrl.refresh);
   router.get('/me', authenticate(tokens), ctrl.me);
