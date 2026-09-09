@@ -224,7 +224,7 @@ model RefreshToken {
   expiraEn         DateTime    @map("expira_en") @db.Timestamptz(6)
   revocada         Boolean     @default(false)
   reemplazadaPorId String?     @map("reemplazada_por") @db.Uuid
-  ip               String?     @db.VarChar(64)
+  ip               String?     @db.Inet
   userAgent        String?     @map("user_agent")
   createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   usedAt           DateTime?   @map("used_at") @db.Timestamptz(6)
@@ -260,7 +260,7 @@ model Patrulla {
   asignadoPorId      String          @map("asignado_por") @db.Uuid
   estado             patrulla_estado @default(asignada)
   fecha              DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
-  horaInicioPrevista DateTime?       @map("hora_inicio_prevista") @db.Time(0)
+  horaInicioPrevista DateTime?       @map("hora_inicio_prevista") @db.Time(6)
   notas              String?
   nombre             String?
   descripcion        String?
@@ -418,7 +418,7 @@ model AuditLog {
   recurso     String?
   recursoId   String?  @map("recurso_id")
   detalle     Json?
-  ip          String?  @db.VarChar(64)
+  ip          String?  @db.Inet
   userAgent   String?  @map("user_agent")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
