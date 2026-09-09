@@ -16,15 +16,27 @@ export interface UbicacionGuardiaRow {
   esSos: boolean;
   sosEstado: string | null;
   estadoOperativo: string;
+  bateriaPct: number | null;
+  precisionM: number | null;
   capturadoEn: Date;
 }
 
 export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
-  interface Point { guardiaId: string; lat: number; lng: number; esSos: boolean; sosEstado: string | null; capturadoEn: Date }
+  interface Point {
+    guardiaId: string;
+    lat: number;
+    lng: number;
+    esSos: boolean;
+    sosEstado: string | null;
+    bateriaPct: number | null;
+    precisionM: number | null;
+    capturadoEn: Date;
+  }
   const points = await db.$queryRaw<Point[]>`
     select distinct on (guardia_id)
       guardia_id as "guardiaId", lat, lng, es_sos as "esSos",
-      sos_estado as "sosEstado", capturado_en as "capturadoEn"
+      sos_estado as "sosEstado", bateria_pct as "bateriaPct",
+      precision_m as "precisionM", capturado_en as "capturadoEn"
     from guardia_telemetria
     order by guardia_id, capturado_en desc
     limit 500`;
@@ -49,6 +61,8 @@ export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
       esSos: p.esSos,
       sosEstado: p.sosEstado,
       estadoOperativo: g.estadoOperativo,
+      bateriaPct: p.bateriaPct != null ? Number(p.bateriaPct) : null,
+      precisionM: p.precisionM != null ? Number(p.precisionM) : null,
       capturadoEn: new Date(p.capturadoEn),
     });
   }

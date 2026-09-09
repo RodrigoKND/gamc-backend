@@ -115,6 +115,21 @@ const USUARIOS = [
   },
 ] as const;
 
+// Hechos demo — distribuidos en los últimos 6 días para poblar el
+// dashboard (KPIs + series por día/tipo/zona). offsetDias=0 es "hoy".
+const HECHOS_DEMO = [
+  { offsetDias: 0, tipo: 'atraco', nivelRiesgo: 'alto', epi: 'central', estado: 'reportado', guardia: 0, lat: -17.3935, lng: -66.1653, direccion: 'Mercado La Cancha', descripcion: 'Ciudadano reporta sustracción de pertenencias en el sector del mercado.' },
+  { offsetDias: 0, tipo: 'hurto', nivelRiesgo: 'bajo', epi: 'norte', estado: 'reportado', guardia: 1, lat: -17.3925, lng: -66.1425, direccion: 'Terminal de Buses', descripcion: 'Ciudadana reporta sustracción de mochila en parada de transporte público.' },
+  { offsetDias: 1, tipo: 'robo_vehículo', nivelRiesgo: 'medio', epi: 'central', estado: 'en_revision', guardia: 0, lat: -17.3899, lng: -66.1571, direccion: 'Parque Vial, Cancha de la 25 de Mayo', descripcion: 'Propietario reporta sustracción de motocicleta estacionada en vía pública.' },
+  { offsetDias: 1, tipo: 'violencia', nivelRiesgo: 'muy_alto', epi: 'norte', estado: 'reportado', guardia: 1, lat: -17.3872, lng: -66.1502, direccion: 'Av. Libertador Simón Bolívar', descripcion: 'Riña entre dos grupos de personas en vía pública durante la madrugada.' },
+  { offsetDias: 2, tipo: 'robo_domicilio', nivelRiesgo: 'alto', epi: 'norte', estado: 'en_revision', guardia: 1, lat: -17.3941, lng: -66.1418, direccion: 'Zona Muyurina, calle Los Álamos', descripcion: 'Vecino reporta ingreso forzado a vivienda deshabitada.' },
+  { offsetDias: 2, tipo: 'hurto', nivelRiesgo: 'bajo', epi: 'central', estado: 'cerrado', guardia: 0, lat: -17.3757, lng: -66.1589, direccion: 'Av. América esq. Av. Ayacucho', descripcion: 'Ciudadana reporta sustracción de billetera en vía pública.' },
+  { offsetDias: 3, tipo: 'otro', nivelRiesgo: 'medio', epi: 'norte', estado: 'reportado', guardia: 1, lat: -17.3808, lng: -66.1547, direccion: 'Av. Circunvalación y Av. 6 de Agosto', descripcion: 'Colisión menor entre dos vehículos particulares sin heridos reportados.' },
+  { offsetDias: 3, tipo: 'emergencia', nivelRiesgo: 'muy_alto', epi: 'central', estado: 'cerrado', guardia: 0, lat: -17.3925, lng: -66.1425, direccion: 'Terminal de Buses', descripcion: 'Persona en situación de calle presenta pérdida de conciencia. Se solicitó ambulancia municipal.' },
+  { offsetDias: 4, tipo: 'atraco', nivelRiesgo: 'muy_alto', epi: 'norte', estado: 'reportado', guardia: 1, lat: -17.3861, lng: -66.1489, direccion: 'Av. Petrolera km 4', descripcion: 'Comerciante reporta intento de robo a mano armada.' },
+  { offsetDias: 5, tipo: 'otro', nivelRiesgo: 'bajo', epi: 'central', estado: 'cerrado', guardia: 0, lat: -17.3968, lng: -66.1799, direccion: 'Av. Villazón esq. Adela Zamudio', descripcion: 'Comerciantes reportan venta ambulante fuera de zona autorizada.' },
+] as const;
+
 const GUARDIAS = [
   {
     usuario: 'b.choque',
@@ -198,10 +213,11 @@ async function main() {
       if (u.rol === 'super_admin') mariaId = user.id;
     }
 
+    const guardiaIds: string[] = [];
     for (let i = 0; i < GUARDIAS.length; i++) {
       const g = GUARDIAS[i]!;
       const epi = await tx.epi.findUnique({ where: { codigo: g.epi } });
-      await tx.guardia.upsert({
+      const guardia = await tx.guardia.upsert({
         where: { ci: g.ci },
         update: { passwordHash: guardiaPws[i]! },
         create: {
@@ -218,6 +234,80 @@ async function main() {
           estadoOperativo: 'fuera_de_servicio',
           debeCambiarPassword: false,
           creadoPorId: mariaId,
+        },
+      });
+      guardiaIds.push(guardia.id);
+    }
+
+    // Hechos/turno/telemetría demo — solo la primera vez (idempotente por
+    // conteo, no hay clave natural en `hecho` para upsert). Sin esto el
+    // dashboard (KPIs + series) queda en cero: no hay otra vía web para
+    // crear hechos, los reporta el guardia desde el móvil (RF fuera de
+    // alcance de esta entrega).
+    const hechosExistentes = await tx.hecho.count();
+    if (hechosExistentes === 0) {
+      const tiposPorCodigo = new Map((await tx.tipoHecho.findMany()).map((t) => [t.codigo, t.id]));
+      const episPorCodigo = new Map((await tx.epi.findMany()).map((e) => [e.codigo, e.id]));
+      const ahora = Date.now();
+
+      for (const h of HECHOS_DEMO) {
+        const ocurridoEn = new Date(ahora - h.offsetDias * 24 * 60 * 60 * 1000);
+        await tx.hecho.create({
+          data: {
+            guardiaId: guardiaIds[h.guardia]!,
+            tipoHechoId: tiposPorCodigo.get(h.tipo)!,
+            epiId: episPorCodigo.get(h.epi) ?? null,
+            descripcion: h.descripcion,
+            direccion: h.direccion,
+            nivelRiesgo: h.nivelRiesgo,
+            lat: h.lat,
+            lng: h.lng,
+            estado: h.estado,
+            ocurridoEn,
+            reportadoEn: ocurridoEn,
+          },
+        });
+      }
+
+      // Turno abierto para Karen (guardiaIds[1]) → KPI "Guardias en Servicio".
+      await tx.turno.create({
+        data: {
+          guardiaId: guardiaIds[1]!,
+          estado: 'en_servicio',
+          selfieInicioUrl: 'https://mock.gamc.local/selfies/k-ferreira-inicio.jpg',
+          latInicio: -17.3742,
+          lngInicio: -66.1601,
+          horainicio: new Date(ahora - 2 * 60 * 60 * 1000),
+        },
+      });
+
+      // SOS sin atender para Benjamín (guardiaIds[0]) → KPI "Alertas SOS".
+      // Dispara trg_telemetria_sos_emergencia (0002_triggers_ayuda): pasa a
+      // guardia.estado_operativo='emergencia' automáticamente.
+      await tx.guardiaTelemetria.create({
+        data: {
+          guardiaId: guardiaIds[0]!,
+          lat: -17.3861,
+          lng: -66.1489,
+          esSos: true,
+          sosEstado: 'pendiente',
+          capturadoEn: new Date(ahora - 5 * 60 * 1000),
+        },
+      });
+
+      // Ping normal para Karen (guardiaIds[1]) — datos de prueba de
+      // ubicación mientras no hay integración real con el móvil (POST
+      // /api/telemetry). Se borra solo: en cuanto el móvil mande su
+      // primer ping real, este queda reemplazado en /api/mapas/ubicaciones
+      // (que siempre muestra el más reciente por guardia).
+      await tx.guardiaTelemetria.create({
+        data: {
+          guardiaId: guardiaIds[1]!,
+          lat: -17.3742,
+          lng: -66.1601,
+          bateriaPct: 85,
+          esSos: false,
+          capturadoEn: new Date(ahora - 2 * 60 * 1000),
         },
       });
     }
