@@ -96,8 +96,12 @@ create table "user" (
   segundo_nombre        text,
   apellido_paterno      text not null,
   apellido_materno      text not null,
-  nombre                text not null generated always as
-                        (trim(concat_ws(' ', primer_nombre, segundo_nombre, apellido_paterno, apellido_materno))) stored,
+  nombre                text not null generated always as (
+                          btrim(regexp_replace(
+                            primer_nombre || ' ' || coalesce(segundo_nombre, '') || ' ' || apellido_paterno || ' ' || apellido_materno,
+                            '\s+', ' ', 'g'
+                          ))
+                        ) stored,
   email                 text not null unique,
   usuario               text not null unique,
   ci                    text unique,                       -- carnÃ© de identidad (web)
@@ -123,8 +127,12 @@ create table guardia (
   segundo_nombre        text,
   apellido_paterno      text not null,
   apellido_materno      text not null,
-  nombre                text not null generated always as
-                        (trim(concat_ws(' ', primer_nombre, segundo_nombre, apellido_paterno, apellido_materno))) stored,
+  nombre                text not null generated always as (
+                          btrim(regexp_replace(
+                            primer_nombre || ' ' || coalesce(segundo_nombre, '') || ' ' || apellido_paterno || ' ' || apellido_materno,
+                            '\s+', ' ', 'g'
+                          ))
+                        ) stored,
   ci                    text not null unique,
   usuario               text not null unique,
   password_hash         text,                              -- null hasta la activaciÃ³n
@@ -350,12 +358,15 @@ create index ix_audit_actor   on audit_log (actor_user_id, created_at desc);
 
 -- 7.1 updated_at automÃ¡tico
 create or replace function set_updated_at() returns trigger as $$
+begin
   new.updated_at = now();
   return new;
-end $$ language plpgsql;
+end;
+$$ language plpgsql;
 
 do $$
 declare t text;
+begin
   foreach t in array array['epi','"user"','guardia','ruta_plantilla','patrulla','turno','hecho']
   loop
     execute format(
@@ -367,8 +378,10 @@ end $$;
 
 -- 7.2 audit_log inmutable
 create or replace function audit_log_inmutable() returns trigger as $$
+begin
   raise exception 'audit_log es inmutable: % no permitido', tg_op;
-end $$ language plpgsql;
+end;
+$$ language plpgsql;
 create trigger trg_audit_no_update before update or delete on audit_log
   for each row execute function audit_log_inmutable();
 
