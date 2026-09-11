@@ -75,6 +75,11 @@ enum evidencia_tipo {
   video
 }
 
+enum checkpoint_estado {
+  realizado
+  perdido
+}
+
 // ------------------------------------------------------ 2. catálogos
 
 model Epi {
@@ -199,6 +204,7 @@ model Guardia {
   hechoes   Hecho[]
   telemetrias GuardiaTelemetria[]
   mandados  Mandado[]
+  checkpoints Checkpoint[]
 
   @@map("guardia")
 }
@@ -305,6 +311,7 @@ model Turno {
   telemetrias GuardiaTelemetria[]
   hechoes     Hecho[]
   mandados    Mandado[]
+  checkpoints Checkpoint[]
 
   @@map("turno")
 }
@@ -386,6 +393,32 @@ model Mandado {
   guardia Guardia @relation(fields: [guardiaId], references: [id])
 
   @@map("mandado")
+}
+
+// Verificación periódica de ronda (selfie + GPS) durante el turno — NO es lo
+// mismo que `guardia_telemetria` (GPS continuo cada ~15s/25m): el checkpoint
+// es una confirmación deliberada de presencia/identidad cada 30 minutos
+// (`CHECKPOINT_INTERVALO_MS` en la app), con foto. `estado='perdido'` queda
+// reservado para cuando la app decida reportar que el guardia no respondió
+// a tiempo (hoy no lo hace — solo lo marca en memoria local); por eso
+// `fotoUrl`/`lat`/`lng` son opcionales.
+model Checkpoint {
+  id          String            @id @default(uuid())
+  turnoId     String            @map("turno_id") @db.Uuid
+  guardiaId   String            @map("guardia_id") @db.Uuid
+  estado      checkpoint_estado @default(realizado)
+  fotoUrl     String?           @map("foto_url")
+  lat         Float?
+  lng         Float?
+  capturadoEn DateTime          @map("capturado_en") @db.Timestamptz(6)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  turno   Turno   @relation(fields: [turnoId], references: [id], onDelete: Cascade)
+  guardia Guardia @relation(fields: [guardiaId], references: [id])
+
+  @@index([turnoId])
+  @@index([guardiaId, capturadoEn(sort: Desc)])
+  @@map("checkpoint")
 }
 
 // ------------------------------------------------------ 6. derivados / auditoría

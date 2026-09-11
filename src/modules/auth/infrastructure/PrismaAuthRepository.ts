@@ -119,6 +119,13 @@ export class PrismaAuthRepository implements AuthRepository {
     return this.findGuardiaByIdentifier(usuario);
   }
 
+  async activateGuardiaFirstLogin(guardiaId: string): Promise<void> {
+    await this.client.guardia.updateMany({
+      where: { id: guardiaId, estado: 'pendiente_activacion' },
+      data: { estado: 'activo', activadoEn: new Date() },
+    });
+  }
+
   async findRoleById(roleId: string): Promise<{ codigo: string } | null> {
     const row = await this.client.role.findUnique({ where: { id: roleId }, select: { codigo: true } });
     return row ?? null;

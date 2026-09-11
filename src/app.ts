@@ -19,6 +19,9 @@ import { buildTelemetryRouter } from '@modules/telemetry/telemetry.routes';
 import { buildTurnosRouter } from '@modules/turnos/turnos.routes';
 import { buildMandadosRouter } from '@modules/mandados/mandados.routes';
 import { buildPatrullasRouter } from '@modules/patrullas/patrullas.routes';
+import { buildMediaRouter } from '@modules/media/media.routes';
+import { UPLOADS_DIR } from '@modules/media/media.storage';
+import { buildCheckpointsRouter } from '@modules/checkpoints/checkpoints.routes';
 import type { Container } from './composition.js';
 
 // Ensamblaje del API HTTP (Express). Respuestas comprimidas con gzip,
@@ -27,7 +30,15 @@ import type { Container } from './composition.js';
 export function createApp(c: Container): express.Express {
   const app = express();
 
-  app.set('trust proxy', true);
+  // `true` confía en TODA la cadena de X-Forwarded-For — cualquier cliente
+  // puede mandar ese header y hacerse pasar por otra IP, lo que le permite
+  // esquivar los rate limiters de login (basados en IP) a voluntad. `1`
+  // confía solo en el primer proxy inmediato (el Nginx/Caddy de producción,
+  // BD_UNIFICADA §9) y descarta el resto de la cadena — es el valor que
+  // recomienda el propio error de express-rate-limit
+  // (ERR_ERL_PERMISSIVE_TRUST_PROXY). En dev, sin proxy delante, no cambia
+  // nada en la práctica (no hay X-Forwarded-For real que confiar).
+  app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(compression({ threshold: 0 }));
@@ -54,6 +65,15 @@ export function createApp(c: Container): express.Express {
   app.use('/api/turnos', buildTurnosRouter(c.tokens));
   app.use('/api/mandados', buildMandadosRouter(c.tokens));
   app.use('/api/patrullas', buildPatrullasRouter(c.tokens));
+  app.use('/api/checkpoints', buildCheckpointsRouter(c.tokens));
+  app.use('/api/media', buildMediaRouter(c.tokens));
+  // Archivos subidos (selfie de turno, evidencia de hecho) — servidos
+  // estáticos desde disco, namespace separado de /api para poder, más
+  // adelante, servirlos directo desde Nginx sin pasar por Node.
+  app.use(
+    '/media',
+    express.static(UPLOADS_DIR, { maxAge: '365d', immutable: true }),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
+import { reverseGeocode } from '@shared/geocoding';
 import { PasswordService } from '@modules/auth/application/password.service';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
@@ -12,6 +13,7 @@ export type EstadoCuentaGuardia = 'pendiente_activacion' | 'activo' | 'inactivo'
 export interface GuardiaUbicacion {
   lat: number;
   lng: number;
+  direccion: string | null;
   precisionM: number | null;
   bateriaPct: number | null;
   esSos: boolean;
@@ -66,9 +68,12 @@ async function ultimaPosicion(guardiaIds: string[]): Promise<Map<string, Guardia
     order by guardia_id, capturado_en desc`;
   const map = new Map<string, GuardiaUbicacion>();
   for (const row of rows) {
+    // Secuencial a propósito (throttle de Nominatim en shared/geocoding.ts).
+    const direccion = await reverseGeocode(row.lat, row.lng);
     map.set(row.guardiaId, {
       lat: row.lat,
       lng: row.lng,
+      direccion,
       precisionM: row.precisionM != null ? Number(row.precisionM) : null,
       bateriaPct: row.bateriaPct,
       esSos: row.esSos,
