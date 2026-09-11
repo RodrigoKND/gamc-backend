@@ -353,7 +353,8 @@ create or replace function set_updated_at() returns trigger as $$
 begin
   new.updated_at = now();
   return new;
-end $$ language plpgsql;
+end;
+$$ language plpgsql;
 
 do $$
 declare t text;
@@ -371,7 +372,8 @@ end $$;
 create or replace function audit_log_inmutable() returns trigger as $$
 begin
   raise exception 'audit_log es inmutable: % no permitido', tg_op;
-end $$ language plpgsql;
+end;
+$$ language plpgsql;
 create trigger trg_audit_no_update before update or delete on audit_log
   for each row execute function audit_log_inmutable();
 

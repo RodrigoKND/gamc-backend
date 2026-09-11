@@ -76,17 +76,31 @@ function urlWithDatabase(url, database) {
   }
 }
 
-const adminUrl = urlWithDatabase(dbUrl, 'postgres');
 const schemaFile = findSchemaFile();
+const targetDb = (() => {
+  try {
+    return new URL(dbUrl).pathname.replace(/^\//, '');
+  } catch {
+    return '';
+  }
+})();
 
 console.log(`[setup] Puerto/host según DATABASE_URL. Schema fuente: ${schemaFile}`);
 
-prisma(
-  ['db', 'execute', '--url', adminUrl, '--stdin'],
-  'CREATE DATABASE gamc_seguridad;',
-  { ignoreCodes: ['already exists'], label: 'crear base de datos' },
-);
-console.log('[setup] Base de datos lista.');
+// Supabase (y cualquier Postgres administrado) solo expone la BD "postgres":
+// no se puede ni se debe crear una BD hermana ahí. Ese paso solo aplica para
+// Postgres local con una BD "gamc_seguridad" dedicada.
+if (targetDb && targetDb !== 'postgres') {
+  const adminUrl = urlWithDatabase(dbUrl, 'postgres');
+  prisma(
+    ['db', 'execute', '--url', adminUrl, '--stdin'],
+    `CREATE DATABASE ${targetDb};`,
+    { ignoreCodes: ['already exists'], label: 'crear base de datos' },
+  );
+  console.log('[setup] Base de datos lista.');
+} else {
+  console.log('[setup] BD "postgres" (Supabase): se omite CREATE DATABASE.');
+}
 
 prisma(
   ['db', 'execute', '--url', dbUrl, '--stdin'],
