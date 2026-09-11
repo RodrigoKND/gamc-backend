@@ -135,13 +135,25 @@ export class AuthService {
   ): Promise<GuardiaAuthResponse> {
     const guardia = await this.deps.repo.findGuardiaByIdentifier(usuario);
     if (!guardia) throw Errors.invalidCredentials();
-    if (guardia.estado === 'pendiente_activacion') throw Errors.guardiaPendienteActivacion();
-    if (guardia.estado !== 'activo') throw Errors.accountDisabled();
+    if (guardia.estado !== 'activo' && guardia.estado !== 'pendiente_activacion') {
+      throw Errors.accountDisabled();
+    }
 
     const ok = await PasswordService.verify(password, guardia.passwordHash);
     if (!ok) throw Errors.invalidCredentials();
 
-    return this.issueGuardiaSession(guardia, meta, 'login');
+    // Activación implícita (BD_UNIFICADA §5): todavía no existe un canal
+    // (SMS/correo) para entregarle al guardia un `activacionToken` propio de
+    // `/mobile/auth/activar` — por ahora, mientras eso se define e
+    // implementa, la cuenta se activa sola en el primer login exitoso con la
+    // contraseña temporal que la Dirección le entregó desde la web. El flujo
+    // por token sigue existiendo intacto para cuando haya un canal real.
+    const activandoAhora = guardia.estado === 'pendiente_activacion';
+    if (activandoAhora) {
+      await this.deps.repo.activateGuardiaFirstLogin(guardia.id);
+    }
+
+    return this.issueGuardiaSession(guardia, meta, activandoAhora ? 'activar_guardia' : 'login');
   }
 
   /** Primer login: fija la contraseña y activa la cuenta (BD_UNIFICADA §5). */

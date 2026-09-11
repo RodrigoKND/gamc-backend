@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
+import { reverseGeocode } from '@shared/geocoding';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 
@@ -13,12 +14,14 @@ export interface UbicacionGuardiaRow {
   epiNombre: string | null;
   lat: number;
   lng: number;
+  direccion: string | null;
   esSos: boolean;
   sosEstado: string | null;
   estadoOperativo: string;
   bateriaPct: number | null;
   precisionM: number | null;
   capturadoEn: Date;
+  turnoInicio: Date | null;
 }
 
 export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
@@ -41,15 +44,25 @@ export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
     order by guardia_id, capturado_en desc
     limit 500`;
   if (points.length === 0) return [];
-  const guardias = await db.guardia.findMany({
-    where: { id: { in: points.map((p) => p.guardiaId) } },
-    include: { epi: { select: { codigo: true, nombre: true } } },
-  });
+  const [guardias, turnosAbiertos] = await Promise.all([
+    db.guardia.findMany({
+      where: { id: { in: points.map((p) => p.guardiaId) } },
+      include: { epi: { select: { codigo: true, nombre: true } } },
+    }),
+    db.turno.findMany({
+      where: { guardiaId: { in: points.map((p) => p.guardiaId) }, estado: 'en_servicio' },
+      select: { guardiaId: true, horainicio: true },
+    }),
+  ]);
   const porId = new Map(guardias.map((g) => [g.id, g]));
+  const turnoInicioPorGuardia = new Map(turnosAbiertos.map((t) => [t.guardiaId, t.horainicio]));
   const out: UbicacionGuardiaRow[] = [];
   for (const p of points) {
     const g = porId.get(p.guardiaId);
     if (!g) continue;
+    // Geocodificación inversa (cacheada/throttled, ver shared/geocoding.ts)
+    // — secuencial a propósito para respetar el límite de Nominatim.
+    const direccion = await reverseGeocode(p.lat, p.lng);
     out.push({
       guardiaId: g.id,
       guardiaNombre: nombreCompleto(g),
@@ -58,12 +71,14 @@ export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
       epiNombre: g.epi?.nombre ?? null,
       lat: p.lat,
       lng: p.lng,
+      direccion,
       esSos: p.esSos,
       sosEstado: p.sosEstado,
       estadoOperativo: g.estadoOperativo,
       bateriaPct: p.bateriaPct != null ? Number(p.bateriaPct) : null,
       precisionM: p.precisionM != null ? Number(p.precisionM) : null,
       capturadoEn: new Date(p.capturadoEn),
+      turnoInicio: turnoInicioPorGuardia.get(p.guardiaId) ?? null,
     });
   }
   return out;
