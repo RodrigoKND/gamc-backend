@@ -15,7 +15,8 @@ export interface TelemetryInput {
 }
 
 export interface TelemetryResult {
-  id: bigint;
+  /** `guardia_telemetria.id` es bigserial → se serializa como string (JSON no soporta BigInt). */
+  id: string;
   guardiaId: string;
   turnoId: string | null;
   lat: number;
@@ -56,7 +57,7 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
   });
 
   const payload: TelemetryResult = {
-    id: result.id,
+    id: result.id.toString(),
     guardiaId: result.guardiaId,
     turnoId: result.turnoId,
     lat: result.lat,

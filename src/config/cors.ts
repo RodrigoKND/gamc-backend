@@ -9,12 +9,17 @@ import { env } from './env.js';
 
 export const corsOptions: CorsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true); // peticiones server-to-server
+    // Sin Origin: apps nativas (React Native / Expo Go) y llamadas
+    // server-to-server. No hay cookie ambiente que proteger → se permite.
+    if (!origin) return callback(null, true);
     if (env.CORS_ORIGINS.includes(origin)) return callback(null, true);
+    // Expo web/dev sirve desde puertos y esquemas variables (exp://…, LAN).
+    if (/^exp(o)?:\/\//.test(origin)) return callback(null, true);
     return callback(new Error(`Origen no autorizado por CORS: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-csrf-token'],
+  // `Authorization` habilita el Bearer de la app móvil en navegadores (Expo web).
+  allowedHeaders: ['Content-Type', 'x-csrf-token', 'Authorization'],
   maxAge: 600,
 };

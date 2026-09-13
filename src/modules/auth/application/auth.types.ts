@@ -18,7 +18,8 @@ export interface AuthenticatedPrincipal {
   id: string;
   identifier: string;
   name: string;
-  role: UserRole;
+  /** Rol web (role_permission) o `'guardia'` cuando la sesión viene de la app móvil. */
+  role: UserRole | 'guardia';
   debeCambiarPassword: boolean;
   permissions: PermissionsMap;
 }

@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- GAMC Â· Seguridad Ciudadana â€” Base de datos ÃšNICA (app mÃ³vil + plataforma web)
 -- PostgreSQL 14+   Â·   snake_case Â· PK uuid Â· timestamptz UTC (ISO-8601)
 -- PolÃ­gonos/trazados: jsonb [[lng,lat], ...] (WGS84). Ver NOTA PostGIS en el .md.
@@ -483,7 +483,7 @@ insert into epi (codigo, nombre) values
 insert into tipo_hecho (codigo, label, orden) values
   ('robo','Robo',10), ('asalto','Asalto',20), ('atraco','Atraco',30),
   ('hurto','Hurto',40), ('violencia','Violencia',50), ('emergencia','Emergencia',60),
-  ('robo_vehÃ­culo','Robo de VehÃ­culo',70), ('robo_domicilio','Robo a Domicilio',80),
+  ('robo_vehículo','Robo de Vehículo',70), ('robo_domicilio','Robo a Domicilio',80),
   ('accidente','Accidente',90), ('disturbio','Disturbio',100),
   ('vandalismo','Vandalismo',110), ('otro','Otro',999);
 
