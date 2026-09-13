@@ -1,6 +1,7 @@
 import type { Tx } from '@infra/database';
 import type {
   GuardiaCredentialRow,
+  GuardiaProfileRow,
   PasswordResetRecord,
   RefreshTokenRecord,
   RolePermissionRow,
@@ -28,6 +29,19 @@ export interface AuthRepository {
   findUserById(id: string, tx?: Tx): Promise<UserCredentialRow | null>;
   findGuardiaByIdentifier(identifier: string, tx?: Tx): Promise<GuardiaCredentialRow | null>;
   findGuardiaById(id: string, tx?: Tx): Promise<GuardiaCredentialRow | null>;
+  /** Ficha pública del guardia (con su EPI) para las respuestas del auth móvil. */
+  findGuardiaProfileById(id: string, tx?: Tx): Promise<GuardiaProfileRow | null>;
+  /**
+   * Activación (primer login, BD_UNIFICADA §5): fija password/estado si el
+   * `usuario` + `token` coinciden y el token no expiró. Devuelve la fila ya
+   * activada o `null` si no hubo coincidencia.
+   */
+  activateGuardiaWithToken(
+    usuario: string,
+    activacionToken: string,
+    passwordHash: string,
+    tx?: Tx,
+  ): Promise<GuardiaCredentialRow | null>;
 
   findRoleById(roleId: string, tx?: Tx): Promise<{ codigo: string } | null>;
   updateUserLastLogin(userId: string, tx?: Tx): Promise<void>;

@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncHandler, validate } from '@shared/index';
+import { asyncHandler, validate, Errors } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
-import { authenticate } from '@modules/auth/http/middlewares';
+import { authenticate, type AuthRequest } from '@modules/auth/http/middlewares';
 import { ingestTelemetry } from './telemetry.service.js';
 
 const telemetrySchema = z.object({
-  guardiaId: z.string().uuid(),
+  guardiaId: z.string().uuid().optional(),
   turnoId: z.string().uuid().optional().nullable(),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
@@ -18,18 +18,22 @@ const telemetrySchema = z.object({
   capturadoEn: z.coerce.date(),
 });
 
-// Endpoint del MÓVIL (guardia). La web no lo llama: recibe lo mismo por
-// Socket.io. Cualquier sesión válida puede reportar telemetría; el control
-// de que el punto pertenezca a un turno válido lo hace la app móvil/GPS.
+// Endpoint del MÓVIL (guardia). Acepta cookie (web/dev) o Authorization: Bearer
+// (app). Para un token de guardia el `guardiaId` SIEMPRE sale del JWT: un
+// guardia solo reporta su propia posición. El SOS es esta misma fila con
+// `esSos: true` (BD_UNIFICADA §2.2, se unificó api/sos.ts).
 export function buildTelemetryRouter(tokens: TokenService): Router {
   const router = Router();
   router.use(authenticate(tokens));
 
   router.post(
     '/',
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req: AuthRequest, res) => {
       const input = validate(telemetrySchema, req.body);
-      const data = await ingestTelemetry(input);
+      const guardiaId =
+        req.claims?.tipo === 'guardia' ? req.principal!.id : input.guardiaId;
+      if (!guardiaId) throw Errors.validation('Falta guardiaId.');
+      const data = await ingestTelemetry({ ...input, guardiaId });
       res.status(201).json({ data });
     }),
   );

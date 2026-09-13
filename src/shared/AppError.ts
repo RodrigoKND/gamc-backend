@@ -29,6 +29,16 @@ export const Errors = {
   invalidCredentials: of(401, 'INVALID_CREDENTIALS', 'Credenciales inválidas.'),
   auth: of(401, 'UNAUTHORIZED', 'No autorizado.'),
   accountDisabled: of(403, 'ACCOUNT_DISABLED', 'Cuenta deshabilitada.'),
+  guardiaPendienteActivacion: of(
+    409,
+    'GUARDIA_PENDING_ACTIVATION',
+    'La cuenta aún no está activada. Cree su contraseña con el token de activación.',
+  ),
+  activationInvalid: of(
+    400,
+    'ACTIVATION_INVALID',
+    'Usuario o token de activación inválido, o el token expiró.',
+  ),
   forbidden: of(403, 'FORBIDDEN', 'No tiene permisos para realizar esta acción.'),
   notFound: of(404, 'NOT_FOUND', 'Recurso no encontrado.'),
   conflict: of(409, 'CONFLICT', 'Conflicto con el estado actual del recurso.'),

@@ -25,6 +25,22 @@ export interface GuardiaCredentialRow {
   debeCambiarPassword: boolean;
 }
 
+/** Proyección pública de la ficha del guardia — la devuelve el auth móvil (login/activar/me). */
+export interface GuardiaProfileRow {
+  id: string;
+  usuario: string;
+  nombre: string;
+  ci: string;
+  telefono: string;
+  fotoUrl: string | null;
+  estado: 'pendiente_activacion' | 'activo' | 'inactivo' | 'suspendido';
+  estadoOperativo: 'fuera_de_servicio' | 'en_servicio' | 'emergencia';
+  debeCambiarPassword: boolean;
+  epiId: string | null;
+  epiCodigo: string | null;
+  epiNombre: string | null;
+}
+
 export interface RefreshTokenRecord {
   id: string;
   sujetoTipo: SujetoTipo;

@@ -3,7 +3,12 @@ import type { Tx } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { newCsrfToken, randomResetCode, sha256 } from '@shared/security';
 import type { AuthRepository } from '@modules/auth/domain/auth.repository';
-import type { RolePermissionRow, UserCredentialRow } from '@modules/auth/domain/entities';
+import type {
+  GuardiaCredentialRow,
+  GuardiaProfileRow,
+  RolePermissionRow,
+  UserCredentialRow,
+} from '@modules/auth/domain/entities';
 import { PasswordService } from '@modules/auth/application/password.service';
 import { RefreshTokenIssuer, TokenService } from '@modules/auth/application/token.service';
 import type {
@@ -27,6 +32,13 @@ export interface AuditInput {
   userAgent?: string;
 }
 
+/** Respuesta del auth móvil: tokens en el body (no cookies) + ficha del guardia. */
+export interface GuardiaAuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  guardia: GuardiaProfileRow;
+}
+
 export interface AuthServiceDeps {
   repo: AuthRepository;
   tokens: TokenService;
@@ -42,6 +54,17 @@ function permissionsFrom(rows: RolePermissionRow[]): PermissionsMap {
     map[row.recurso] = { ver: row.puedeVer, crear: row.puedeCrear, editar: row.puedeEditar, eliminar: row.puedeEliminar };
   }
   return map;
+}
+
+function guardiaPrincipal(guardia: GuardiaCredentialRow): AuthenticatedPrincipal {
+  return {
+    id: guardia.id,
+    identifier: guardia.usuario,
+    name: guardia.nombre,
+    role: 'guardia',
+    debeCambiarPassword: guardia.debeCambiarPassword,
+    permissions: {}, // los guardias no usan role_permission (BD_UNIFICADA §1)
+  };
 }
 
 function principalFrom(
@@ -100,6 +123,131 @@ export class AuthService {
     return session;
   }
 
+  // ── Auth móvil (guardias) ─────────────────────────────────────────────────
+  // Mismos primitivos que la web (issueSession, refresh rotativo) pero con
+  // `sujeto_tipo = 'guardia'`, sin role_permission y devolviendo los tokens
+  // en el JSON. El JWT lleva `sub = uuid del guardia` y `tipo = 'guardia'`.
+
+  async loginGuardia(
+    usuario: string,
+    password: string,
+    meta: AuthSessionMetadata,
+  ): Promise<GuardiaAuthResponse> {
+    const guardia = await this.deps.repo.findGuardiaByIdentifier(usuario);
+    if (!guardia) throw Errors.invalidCredentials();
+    if (guardia.estado === 'pendiente_activacion') throw Errors.guardiaPendienteActivacion();
+    if (guardia.estado !== 'activo') throw Errors.accountDisabled();
+
+    const ok = await PasswordService.verify(password, guardia.passwordHash);
+    if (!ok) throw Errors.invalidCredentials();
+
+    return this.issueGuardiaSession(guardia, meta, 'login');
+  }
+
+  /** Primer login: fija la contraseña y activa la cuenta (BD_UNIFICADA §5). */
+  async activarGuardia(
+    input: { usuario: string; activacionToken: string; password: string },
+    meta: AuthSessionMetadata,
+  ): Promise<GuardiaAuthResponse> {
+    const passwordHash = await PasswordService.hash(input.password);
+    const guardia = await this.deps.repo.activateGuardiaWithToken(
+      input.usuario,
+      input.activacionToken,
+      passwordHash,
+    );
+    if (!guardia) throw Errors.activationInvalid();
+    return this.issueGuardiaSession(guardia, meta, 'activar_guardia');
+  }
+
+  async refreshGuardia(
+    rawRefreshToken: string,
+    meta: AuthSessionMetadata,
+  ): Promise<GuardiaAuthResponse> {
+    const record = await this.deps.repo.findRefreshTokenByHash(sha256(rawRefreshToken));
+    if (!record) throw Errors.auth();
+    if (record.revocada) {
+      await this.deps.repo.revokeRefreshFamilia(record.familia);
+      throw Errors.auth('Su sesión fue renovada en otro dispositivo. Ingrese nuevamente.');
+    }
+    if (record.expiraEn.getTime() < Date.now()) throw Errors.auth();
+    if (record.sujetoTipo !== 'guardia') throw Errors.auth();
+
+    const guardia = await this.deps.repo.findGuardiaById(record.sujetoId);
+    if (!guardia) throw Errors.auth();
+    if (guardia.estado !== 'activo') throw Errors.accountDisabled();
+
+    const pair = this.deps.refreshIssuer.issue(meta, record.familia);
+    await this.deps.withTransaction(async (tx) => {
+      // Crear ANTES de rotar: `refresh_token.reemplazada_por` es FK a
+      // refresh_token(id), la fila nueva debe existir primero.
+      await this.deps.repo.createRefreshToken(
+        {
+          id: pair.id,
+          sujetoTipo: 'guardia',
+          sujetoId: record.sujetoId,
+          tokenHash: pair.hash,
+          familia: pair.familia,
+          expiraEn: pair.expiraEn,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        },
+        tx,
+      );
+      await this.deps.repo.rotateRefreshToken(record.id, pair.id, tx);
+    });
+
+    const accessToken = await this.deps.tokens.signAccessToken(
+      this.deps.tokens.toClaims({
+        id: guardia.id,
+        tipo: 'guardia',
+        rol: 'guardia',
+        ident: guardia.usuario,
+        nombre: guardia.nombre,
+        permissions: {},
+      }),
+    );
+    const profile = await this.requireGuardiaProfile(guardia.id);
+    return { accessToken, refreshToken: pair.token, guardia: profile };
+  }
+
+  private async issueGuardiaSession(
+    guardia: GuardiaCredentialRow,
+    meta: AuthSessionMetadata,
+    accion: 'login' | 'activar_guardia',
+  ): Promise<GuardiaAuthResponse> {
+    const session = await this.issueSession(
+      'guardia',
+      guardia.id,
+      guardia.nombre,
+      guardiaPrincipal(guardia),
+      meta,
+    );
+    await this.deps.audit({
+      actorUserId: null,
+      actorTipo: 'guardia',
+      accion,
+      recurso: 'auth',
+      recursoId: guardia.id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    const profile = await this.requireGuardiaProfile(guardia.id);
+    return { accessToken: session.accessToken, refreshToken: session.refreshToken, guardia: profile };
+  }
+
+  private async requireGuardiaProfile(id: string): Promise<GuardiaProfileRow> {
+    const profile = await this.deps.repo.findGuardiaProfileById(id);
+    if (!profile) throw Errors.auth();
+    return profile;
+  }
+
+  /** Ficha del guardia autenticado (endpoint `GET /api/mobile/auth/me`). */
+  async getGuardiaProfile(id: string): Promise<GuardiaProfileRow> {
+    const profile = await this.requireGuardiaProfile(id);
+    if (profile.estado !== 'activo') throw Errors.accountDisabled();
+    return profile;
+  }
+
   async refresh(rawRefreshToken: string, meta: AuthSessionMetadata): Promise<RefreshResult> {
     const hash = sha256(rawRefreshToken);
     const record = await this.deps.repo.findRefreshTokenByHash(hash);
@@ -123,7 +271,8 @@ export class AuthService {
     const pair = this.deps.refreshIssuer.issue(meta, record.familia);
 
     await this.deps.withTransaction(async (tx) => {
-      await this.deps.repo.rotateRefreshToken(record.id, pair.id, tx);
+      // Crear ANTES de rotar: `refresh_token.reemplazada_por` es FK a
+      // refresh_token(id), la fila nueva debe existir primero.
       await this.deps.repo.createRefreshToken(
         {
           id: pair.id,
@@ -137,6 +286,7 @@ export class AuthService {
         },
         tx,
       );
+      await this.deps.repo.rotateRefreshToken(record.id, pair.id, tx);
     });
 
     const accessToken = await this.deps.tokens.signAccessToken(this.deps.tokens.toClaims({
