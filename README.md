@@ -2,7 +2,7 @@
 
 Backend de la plataforma de la **Dirección de Seguridad Ciudadana del Gobierno
 Autónomo Municipal de Cochabamba (GAMC)**. API REST (Express 4 + TypeScript) con
-PostgreSQL (Prisma ORM), autenticación JWT con rotación de refresh, RBAC por rol,
+Supabase (PostgreSQL, vía Prisma ORM), autenticación JWT con rotación de refresh, RBAC por rol,
 Socket.io para telemetría en tiempo real y rate limiting en login/recuperación.
 
 - **Puerto:** `4000`
@@ -13,7 +13,7 @@ Socket.io para telemetría en tiempo real y rate limiting en login/recuperación
 ## Requisitos
 
 - **Node.js ≥ 20**
-- **PostgreSQL ≥ 14** (el proyecto se desarrolló y probó en PostgreSQL 16 y 18)
+- **Un proyecto de [Supabase](https://supabase.com)** (PostgreSQL 17 gestionado; connection string en Project Settings → Database)
 
 ---
 
@@ -33,7 +33,7 @@ Variables clave:
 
 | Variable | Descripción |
 | --- | --- |
-| `DATABASE_URL` | `postgresql://usuario:password@host:puerto/gamc_seguridad` |
+| `DATABASE_URL` | Connection string de Supabase, ideal "Session pooler" (puerto 5432, IPv4): `postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres` |
 | `JWT_SECRET` | Clave de firma de los JWT (≥32 caracteres). **Debe coincidir** con la del frontend (`GAMC/.env.local`) |
 | `ACCESS_TOKEN_MINUTES` | Vida del access token en minutos (default `15`) |
 | `REFRESH_TOKEN_DAYS` | Vida del refresh token en días (default `7`) |
@@ -46,12 +46,15 @@ Variables clave:
 
 ---
 
-## Base de datos
+## Base de datos (Supabase)
 
-Hay dos formas equivalentes de preparar la BD:
+1. Crea (o usa) un proyecto en [supabase.com](https://supabase.com).
+2. Copia el connection string (Project Settings → Database → "Session pooler")
+   a `DATABASE_URL` en `.env`.
+3. Prepara el schema con una de estas dos formas equivalentes:
 
 ```bash
-# Opción A — setup automatizado (crea BD, carga schema, migración y seed)
+# Opción A — setup automatizado (carga schema, marca migración, corre seed)
 npm run db:setup
 
 # Opción B — migraciones + seed de Prisma
@@ -59,7 +62,7 @@ npm run db:migrate
 npm run db:seed
 ```
 
-Todos los comandos asumen que la BD `gamc_seguridad` es accesible según
+Todos los comandos usan la BD `postgres` del proyecto Supabase apuntado por
 `DATABASE_URL`. Ver [prisma/migrations](/prisma/migrations) y `scripts/setup-db.mjs`.
 
 ---
