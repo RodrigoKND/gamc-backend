@@ -267,7 +267,6 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
   const guardia = await getGuardia(id);
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `guardia_operativo_${estadoOperativo}`, recurso: 'guardias', recursoId: id });
-<<<<<<< HEAD
   // Incluir esSos:false para que el handler optimista de MapasView limpie el SOS al instante
   // (antes el payload no tenía esSos y el frontend hacía payload.esSos ?? cur.hasSos -> se quedaba en true)
   const esSosResuelto = estadoOperativo !== 'emergencia' ? false : undefined;
@@ -277,27 +276,18 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
     estado: guardia.estado,
     ...(esSosResuelto !== undefined ? { esSos: esSosResuelto, sosEstado: 'atendido' } : {}),
   });
-  // Emitir guardia:estado siempre que se sale de emergencia para forzar reload completo
-  // (antes solo si prev==='emergencia' && nuevo==='en_servicio', dejaba casos desincronizados sin refresh)
+  // FIX 2026-09-15 + SOS: publicar guardiaEstado siempre para que Mapas recargue completo
+  // sin importar la transición (antes solo emergencia->en_servicio). Si se sale de emergencia
+  // también emitir sos:nuevo con esSos false para banner/notificaciones.
+  publish(EVENTS.guardiaEstado, {
+    guardiaId: id,
+    estadoOperativo,
+    estado: guardia.estado,
+    ...(esSosResuelto !== undefined ? { esSos: false } : {}),
+  });
   if (estadoOperativo !== 'emergencia') {
-    publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado, esSos: false });
-    // También emitir sos:nuevo con esSos false para que GlobalSosBanner/notificaciones se enteren al instante
     publish(EVENTS.sosNuevo, { guardiaId: id, esSos: false, estadoOperativo });
   }
-=======
-  publish(EVENTS.guardiaUbicacion, { guardiaId: id, estadoOperativo, estado: guardia.estado });
-  // FIX 2026-09-15: antes `guardiaEstado` solo se publicaba en la transición
-  // 'emergencia' -> 'en_servicio' (resolver) — activar una emergencia por
-  // esta vía (admin/operador, no un SOS real del móvil) no disparaba NADA
-  // que Mapas supiera escuchar para recargar completo (useRealtimeMap solo
-  // reacciona a guardiaEstado/sosNuevo/patrulla*, no a guardiaUbicacion sin
-  // lat/lng), dejando el mapa desactualizado hasta el siguiente poll de
-  // respaldo (8-30s). Guardias sí se enteraba porque a esa vista le basta
-  // CUALQUIER evento para refrescar — de ahí que "a veces se entera Guardias
-  // y Mapas no" fuera 100% determinista según la transición, no al azar.
-  // Ahora se publica siempre, en cualquier cambio de estado operativo.
-  publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado });
->>>>>>> 94e1c488215fd67971530c456c2010183106b4b7
   return guardia;
 }
 
