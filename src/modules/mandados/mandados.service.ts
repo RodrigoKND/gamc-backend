@@ -1,6 +1,7 @@
 import { db } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { logAudit } from '@modules/auditoria/auditoria.service';
+import { EVENTS, publish, isRealtimeReady } from '@infra/realtime';
 
 // Mandados / comisiones puntuales del turno (BD_UNIFICADA §5.4). Los escribe
 // el móvil; la web solo lee.
@@ -55,6 +56,17 @@ export async function crearMandado(input: CrearMandadoInput): Promise<MandadoRow
     recurso: 'mandado',
     recursoId: row.id,
   });
+  if (isRealtimeReady()) {
+    publish(EVENTS.mandadoNuevo, {
+      id: row.id,
+      guardiaId: row.guardiaId,
+      descripcion: row.descripcion,
+      lat: row.lat,
+      lng: row.lng,
+      creadoEn: row.creadoEn,
+    });
+    publish(EVENTS.hechoActualizado, { tipo: 'mandado', id: row.id });
+  }
   return {
     id: row.id,
     turnoId: row.turnoId,
@@ -80,5 +92,23 @@ export async function listMandadosDeGuardia(guardiaId: string, limit = 100): Pro
     lat: row.lat,
     lng: row.lng,
     creadoEn: row.creadoEn,
+  }));
+}
+
+export async function listMandadosRecientes(limit = 50): Promise<(MandadoRow & { guardiaNombre: string | null })[]> {
+  const rows = await db.mandado.findMany({
+    orderBy: { creadoEn: 'desc' },
+    take: Math.min(Math.max(limit, 1), 300),
+    include: { guardia: { select: { primerNombre: true, apellidoPaterno: true } } },
+  });
+  return rows.map((row: any) => ({
+    id: row.id,
+    turnoId: row.turnoId,
+    guardiaId: row.guardiaId,
+    descripcion: row.descripcion,
+    lat: row.lat,
+    lng: row.lng,
+    creadoEn: row.creadoEn,
+    guardiaNombre: row.guardia ? `${row.guardia.primerNombre} ${row.guardia.apellidoPaterno}` : null,
   }));
 }

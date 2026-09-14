@@ -26,6 +26,25 @@ export function buildTelemetryRouter(tokens: TokenService): Router {
   const router = Router();
   router.use(authenticate(tokens));
 
+  // Estado SOS actual del guardia autenticado (para que el botón SOS sepa si ya fue atendido)
+  router.get(
+    '/estado',
+    asyncHandler(async (req: AuthRequest, res) => {
+      const guardiaId = req.principal!.id;
+      const { db } = await import('@infra/database');
+      const last: any = await db.guardiaTelemetria.findFirst({
+        where: { guardiaId },
+        orderBy: { capturadoEn: 'desc' },
+        select: { esSos: true, sosEstado: true, capturadoEn: true },
+      });
+      const guardia: any = await db.guardia.findUnique({
+        where: { id: guardiaId },
+        select: { estadoOperativo: true },
+      });
+      res.json({ data: { esSos: last?.esSos ?? false, sosEstado: last?.sosEstado ?? null, estadoOperativo: guardia?.estadoOperativo ?? null, capturadoEn: last?.capturadoEn ?? null } });
+    }),
+  );
+
   router.post(
     '/',
     asyncHandler(async (req: AuthRequest, res) => {
