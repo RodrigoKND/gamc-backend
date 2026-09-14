@@ -4,7 +4,7 @@ import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
-import { peekAddress } from './geocoding.service.js';
+import { peekAddress, reverseGeocode } from './geocoding.service.js';
 
 export interface UbicacionGuardiaRow {
   guardiaId: string;
@@ -401,4 +401,21 @@ export async function recalcularZonasCriticas(actorId: string) {
     ventanaDesde: z.ventanaDesde,
     ventanaHasta: z.ventanaHasta,
   }));
+}
+
+// Geocodifica un lote de puntos (breadcrumb de una ruta asignada, TelemetryDrawer
+// en la Web) reusando reverseGeocode — que ya throttlea a 1 req/s a Nominatim,
+// cachea 30 días y manda el User-Agent con contacto que exige su política de
+// uso. Antes la Web llamaba a Nominatim DIRECTO desde el navegador (4
+// requests simultáneos, sin throttle, sin User-Agent) — exactamente lo que
+// esa política prohíbe, y la causa real de que a veces quedara pegado en
+// "Resolviendo calles" (Nominatim empieza a bloquear/demorar el origen). Se
+// resuelve SECUENCIAL (no Promise.all) para que el throttle interno de
+// reverseGeocode sea efectivo entre puntos de la misma llamada.
+export async function geocodificarPuntos(puntos: { lat: number; lng: number }[]): Promise<(string | null)[]> {
+  const direcciones: (string | null)[] = [];
+  for (const p of puntos) {
+    direcciones.push(await reverseGeocode(p.lat, p.lng));
+  }
+  return direcciones;
 }

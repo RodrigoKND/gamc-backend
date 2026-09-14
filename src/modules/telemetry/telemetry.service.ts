@@ -48,11 +48,24 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
         capturadoEn: input.capturadoEn,
       },
     });
-    const estadoOperativo = esSos ? 'emergencia' : 'en_servicio';
-    await tx.guardia.updateMany({
-      where: { id: input.guardiaId },
-      data: { estadoOperativo },
-    });
+    // BUG REAL 2026-09-15 ("se activa y se desactiva sin tocar nada"): esto
+    // antes forzaba `estadoOperativo = 'en_servicio'` en TODO ping sin SOS —
+    // incluyendo el ping GPS rutinario que el móvil manda cada ~45-90s
+    // durante el turno (enviarUbicacion, RF-APP-05, que NUNCA manda esSos).
+    // Resultado: activar el SOS ponía al guardia en 'emergencia' por un
+    // instante, y el siguiente ping normal (segundos/minutos después, sin
+    // que nadie tocara nada) lo revertía solo a 'en_servicio' otra vez —
+    // en bucle, hasta que un operador lo resolvía o el guardia volvía a
+    // apretar SOS. Un ping SIN SOS ya NO toca estadoOperativo: si el
+    // guardia está en 'emergencia' se queda ahí hasta que un operador lo
+    // resuelva explícito (clearSosAction/setEstadoOperativo) — solo un ping
+    // CON esSos=true puede *activar* la emergencia.
+    if (esSos) {
+      await tx.guardia.updateMany({
+        where: { id: input.guardiaId },
+        data: { estadoOperativo: 'emergencia' },
+      });
+    }
     return row;
   });
 
@@ -73,10 +86,12 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
     turnoId: payload.turnoId,
     lat: payload.lat,
     lng: payload.lng,
-    esSos: payload.esSos,
-    sosEstado: payload.sosEstado,
-    estadoOperativo: esSos ? 'emergencia' : 'en_servicio',
     capturadoEn: payload.capturadoEn,
+    // Solo se manda esSos/estadoOperativo cuando el ping SÍ es una alerta
+    // real — un ping rutinario no debe pisar en el cliente (MapasView, ver
+    // el handler optimista de guardiaUbicacion) el hasSos/operationalStatus
+    // que ya tenía el guardia, por la misma razón que ya no se pisa en BD.
+    ...(esSos ? { esSos: true, sosEstado: payload.sosEstado, estadoOperativo: 'emergencia' as const } : {}),
   });
   if (esSos) {
     publish(EVENTS.sosNuevo, payload);

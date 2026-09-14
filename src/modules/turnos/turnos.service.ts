@@ -77,6 +77,7 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
     throw Errors.validation('La patrulla indicada no existe, no es suya o no es del día.');
   }
 
+  let estadoResultante: 'en_servicio' | 'emergencia' = 'en_servicio';
   const turno = await db.$transaction(async (tx) => {
     const created = await tx.turno.create({
       data: {
@@ -95,12 +96,20 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
         data: { turnoId: created.id, estado: 'en_curso', iniciadaEn: new Date() },
       });
     }
+    // Blindaje de emergencia (2026-09-15): si el guardia sigue en
+    // 'emergencia' sin resolver, iniciar un turno nuevo (reconectar, volver
+    // a abrir la app) NO debe sacarlo de emergencia — solo el operador con
+    // "Marcar como resuelto" (clearSosAction) puede hacerlo. Antes esto
+    // pisaba siempre a 'en_servicio', que era otra vía silenciosa para que
+    // la emergencia "se resolviera sola" sin que nadie la atendiera.
+    const actual = await tx.guardia.findUnique({ where: { id: input.guardiaId }, select: { estadoOperativo: true } });
+    estadoResultante = actual?.estadoOperativo === 'emergencia' ? 'emergencia' : 'en_servicio';
     await tx.guardia.update({
       where: { id: input.guardiaId },
       // La selfie de inicio de turno pasa a ser la foto vigente del guardia
       // en Guardias (Web) — se actualiza en la misma transacción que el
       // estado operativo para que ambos cambien a la vez, nunca por separado.
-      data: { estadoOperativo: 'en_servicio', fotoUrl: input.selfieInicioUrl },
+      data: { estadoOperativo: estadoResultante, fotoUrl: input.selfieInicioUrl },
     });
     return created;
   });
@@ -115,7 +124,7 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
   });
   publish(EVENTS.guardiaEstado, {
     guardiaId: input.guardiaId,
-    estadoOperativo: 'en_servicio',
+    estadoOperativo: estadoResultante,
     turnoId: turno.id,
   });
   // Si el guardia tenía una patrulla asignada, ahora pasa a en_curso — el
@@ -148,6 +157,7 @@ export async function cerrarTurno(input: CerrarTurnoInput): Promise<TurnoRow> {
     select fn_turno_distancia(${input.turnoId}::uuid)::float8 as distancia`;
   const distancia = distanciaRows[0]?.distancia ?? 0;
 
+  let estadoResultanteCierre: 'fuera_de_servicio' | 'emergencia' = 'fuera_de_servicio';
   const cerrado = await db.$transaction(async (tx) => {
     const updated = await tx.turno.update({
       where: { id: input.turnoId },
@@ -163,9 +173,13 @@ export async function cerrarTurno(input: CerrarTurnoInput): Promise<TurnoRow> {
       where: { turnoId: input.turnoId, estado: 'en_curso' },
       data: { estado: 'completada', completadaEn: new Date() },
     });
+    // Mismo blindaje que iniciarTurno: cerrar turno tampoco saca a un
+    // guardia de 'emergencia' sin resolver — solo el operador.
+    const actual = await tx.guardia.findUnique({ where: { id: input.guardiaId }, select: { estadoOperativo: true } });
+    estadoResultanteCierre = actual?.estadoOperativo === 'emergencia' ? 'emergencia' : 'fuera_de_servicio';
     await tx.guardia.update({
       where: { id: input.guardiaId },
-      data: { estadoOperativo: 'fuera_de_servicio' },
+      data: { estadoOperativo: estadoResultanteCierre },
     });
     return updated;
   });
@@ -180,7 +194,7 @@ export async function cerrarTurno(input: CerrarTurnoInput): Promise<TurnoRow> {
   });
   publish(EVENTS.guardiaEstado, {
     guardiaId: input.guardiaId,
-    estadoOperativo: 'fuera_de_servicio',
+    estadoOperativo: estadoResultanteCierre,
     turnoId: input.turnoId,
   });
   return toRow(cerrado);
