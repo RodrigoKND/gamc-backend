@@ -268,10 +268,17 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `guardia_operativo_${estadoOperativo}`, recurso: 'guardias', recursoId: id });
   publish(EVENTS.guardiaUbicacion, { guardiaId: id, estadoOperativo, estado: guardia.estado });
-  // Publicar también cambio de telemetría para que el mapa refresque el pin de inmediato
-  if (prev.estadoOperativo === 'emergencia' && estadoOperativo === 'en_servicio') {
-    publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado });
-  }
+  // FIX 2026-09-15: antes `guardiaEstado` solo se publicaba en la transición
+  // 'emergencia' -> 'en_servicio' (resolver) — activar una emergencia por
+  // esta vía (admin/operador, no un SOS real del móvil) no disparaba NADA
+  // que Mapas supiera escuchar para recargar completo (useRealtimeMap solo
+  // reacciona a guardiaEstado/sosNuevo/patrulla*, no a guardiaUbicacion sin
+  // lat/lng), dejando el mapa desactualizado hasta el siguiente poll de
+  // respaldo (8-30s). Guardias sí se enteraba porque a esa vista le basta
+  // CUALQUIER evento para refrescar — de ahí que "a veces se entera Guardias
+  // y Mapas no" fuera 100% determinista según la transición, no al azar.
+  // Ahora se publica siempre, en cualquier cambio de estado operativo.
+  publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado });
   return guardia;
 }
 

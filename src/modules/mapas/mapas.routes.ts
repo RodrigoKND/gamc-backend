@@ -10,6 +10,7 @@ import {
   cancelarPatrulla,
   cancelarRuta,
   crearRutaPlantilla,
+  geocodificarPuntos,
   heatmap,
   patrullasVigentes,
   recalcularZonasCriticas,
@@ -32,6 +33,13 @@ const asignarSchema = z.object({
 // ruteado por calles desde la Web (routing.ts, OSRM) — no son los 2-5
 // puntos que clickeó el Operador, es el camino real con muchos vértices
 // (rediseño 2026-09-14: "debe ir por las calles").
+// Máx. 6 puntos por llamada (el breadcrumb de TelemetryDrawer solo muestrea
+// 4) — evita que alguien mande cientos de puntos y dispare igual cantidad de
+// requests secuenciales a Nominatim en una sola llamada.
+const geocodificarSchema = z.object({
+  puntos: z.array(z.object({ lat: z.number(), lng: z.number() })).min(1).max(6),
+});
+
 const crearRutaSchema = z.object({
   nombre: z.string().trim().min(1).max(120),
   descripcion: z.string().trim().max(500).optional().nullable(),
@@ -109,6 +117,19 @@ export function buildMapasRouter(tokens: TokenService): Router {
     asyncHandler(async (req: AuthRequest, res) => {
       const resultado = await cancelarPatrulla(req.params.id!, req.principal!.id);
       res.json({ data: resultado });
+    }),
+  );
+
+  // Geocodificación inversa en lote para el breadcrumb de ruta del
+  // TelemetryDrawer (Web) — usa el mismo servicio throttled/cacheado que
+  // ubicacionesActuales, nunca llama a Nominatim directo desde el navegador
+  // (ver comentario en geocodificarPuntos, mapas.service.ts).
+  router.post(
+    '/geocodificar',
+    authorize('mapas', 'ver'),
+    asyncHandler(async (req, res) => {
+      const { puntos } = validate(geocodificarSchema, req.body);
+      res.json({ data: await geocodificarPuntos(puntos) });
     }),
   );
 
