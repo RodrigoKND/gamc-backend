@@ -10,7 +10,9 @@ import {
   cancelarPatrulla,
   cancelarRuta,
   crearRutaPlantilla,
+  heatmap,
   patrullasVigentes,
+  recalcularZonasCriticas,
   rutasPlantilla,
   ubicacionesActuales,
   zonasCriticas,
@@ -115,6 +117,25 @@ export function buildMapasRouter(tokens: TokenService): Router {
     authorize('mapas', 'ver'),
     asyncHandler(async (_req, res) => {
       res.json({ data: await zonasCriticas() });
+    }),
+  );
+
+  router.get(
+    '/heatmap',
+    authorize('mapas', 'ver'),
+    asyncHandler(async (req, res) => {
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+      res.json({
+        data: await heatmap({ desde: str(req.query.desde), hasta: str(req.query.hasta), epiId: str(req.query.epiId) }),
+      });
+    }),
+  );
+
+  router.post(
+    '/zonas/recalcular',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await recalcularZonasCriticas(req.principal!.id) });
     }),
   );
 

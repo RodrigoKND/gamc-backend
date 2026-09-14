@@ -13,6 +13,7 @@ export const PasswordService = {
 
   async verify(plain: string, hash: string | null | undefined): Promise<boolean> {
     if (!hash) return false;
+    console.log(plain, hash)
     return bcrypt.compare(plain, hash);
   },
 };

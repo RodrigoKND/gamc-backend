@@ -15,10 +15,11 @@ export interface UbicacionGuardiaRow {
   lat: number;
   lng: number;
   direccion: string | null;
-  bateriaPct: number | null;
   esSos: boolean;
   sosEstado: string | null;
   estadoOperativo: string;
+  bateriaPct: number | null;
+  turnoId: string | null;
   turnoInicio: Date | null;
   capturadoEn: Date;
 }
@@ -28,31 +29,32 @@ export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
     guardiaId: string;
     lat: number;
     lng: number;
-    bateriaPct: number | null;
     esSos: boolean;
     sosEstado: string | null;
+    bateriaPct: number | null;
+    turnoId: string | null;
     capturadoEn: Date;
   }
   const points = await db.$queryRaw<Point[]>`
     select distinct on (guardia_id)
-      guardia_id as "guardiaId", lat, lng, bateria_pct as "bateriaPct", es_sos as "esSos",
-      sos_estado as "sosEstado", capturado_en as "capturadoEn"
+      guardia_id as "guardiaId", lat, lng, es_sos as "esSos",
+      sos_estado as "sosEstado", bateria_pct as "bateriaPct",
+      turno_id as "turnoId", capturado_en as "capturadoEn"
     from guardia_telemetria
     order by guardia_id, capturado_en desc
     limit 500`;
   if (points.length === 0) return [];
-  const [guardias, turnos] = await Promise.all([
-    db.guardia.findMany({
-      where: { id: { in: points.map((p) => p.guardiaId) } },
-      include: { epi: { select: { codigo: true, nombre: true } } },
-    }),
-    db.turno.findMany({
-      where: { guardiaId: { in: points.map((p) => p.guardiaId) }, estado: 'en_servicio' },
-      select: { guardiaId: true, horainicio: true },
-    }),
-  ]);
+  const guardias = await db.guardia.findMany({
+    where: { id: { in: points.map((p) => p.guardiaId) } },
+    include: { epi: { select: { codigo: true, nombre: true } } },
+  });
   const porId = new Map(guardias.map((g) => [g.id, g]));
-  const turnoInicioPorId = new Map(turnos.map((t) => [t.guardiaId, t.horainicio]));
+  // Resolver hora de inicio del turno activo para mostrar en el drawer
+  const turnoIds = points.map((p) => p.turnoId).filter((v): v is string => Boolean(v));
+  const turnos = turnoIds.length
+    ? await db.turno.findMany({ where: { id: { in: turnoIds } }, select: { id: true, horainicio: true } })
+    : [];
+  const turnoPorId = new Map(turnos.map((t) => [t.id, t.horainicio]));
   const out: UbicacionGuardiaRow[] = [];
   for (const p of points) {
     const g = porId.get(p.guardiaId);
@@ -66,11 +68,12 @@ export async function ubicacionesActuales(): Promise<UbicacionGuardiaRow[]> {
       lat: p.lat,
       lng: p.lng,
       direccion: peekAddress(p.lat, p.lng) ?? null,
-      bateriaPct: p.bateriaPct,
       esSos: p.esSos,
       sosEstado: p.sosEstado,
       estadoOperativo: g.estadoOperativo,
-      turnoInicio: turnoInicioPorId.get(g.id) ?? null,
+      bateriaPct: p.bateriaPct,
+      turnoId: p.turnoId,
+      turnoInicio: p.turnoId ? (turnoPorId.get(p.turnoId) ?? null) : null,
       capturadoEn: new Date(p.capturadoEn),
     });
   }
@@ -322,4 +325,80 @@ export async function asignarPatrulla(input: AsignarPatrullaInput) {
     iniciadaEn: patrulla.iniciadaEn,
   });
   return patrulla;
+}
+
+export async function heatmap(params: { desde?: string; hasta?: string; epiId?: string } = {}) {
+  const where: Prisma.HechoWhereInput = {};
+  if (params.epiId) where.epiId = params.epiId;
+  if (params.desde || params.hasta) {
+    where.ocurridoEn = {};
+    if (params.desde) where.ocurridoEn.gte = new Date(params.desde);
+    if (params.hasta) where.ocurridoEn.lte = new Date(params.hasta);
+  }
+  const rows = await db.hecho.findMany({
+    where,
+    select: { lat: true, lng: true, nivelRiesgo: true, epiId: true },
+    take: 2000,
+    orderBy: { ocurridoEn: 'desc' },
+  });
+  return rows;
+}
+
+export async function recalcularZonasCriticas(actorId: string) {
+  // Ventana últimos 7 días: agrupa por epi, cuenta y toma riesgo predominante
+  const desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const grupos = await db.hecho.groupBy({
+    by: ['epiId'],
+    where: { ocurridoEn: { gte: desde } },
+    _count: { id: true },
+  });
+  if (grupos.length === 0) return [];
+  // invalidar anteriores
+  await db.zonaCriticaActiva.updateMany({ where: { vigente: true }, data: { vigente: false } });
+  const out = [];
+  for (const g of grupos) {
+    const hechos = await db.hecho.findMany({
+      where: { epiId: g.epiId, ocurridoEn: { gte: desde } },
+      select: { lat: true, lng: true, nivelRiesgo: true },
+    });
+    if (hechos.length === 0) continue;
+    const lat = hechos.reduce((s, h) => s + h.lat, 0) / hechos.length;
+    const lng = hechos.reduce((s, h) => s + h.lng, 0) / hechos.length;
+    const conteo = hechos.length;
+    // nivel predominante: muy_alto > alto > medio > bajo
+    const peso: Record<string, number> = { bajo: 1, medio: 2, alto: 3, muy_alto: 4 };
+    const nivel = hechos.reduce((a, b) => (peso[b.nivelRiesgo]! > peso[a.nivelRiesgo]! ? b : a), hechos[0]!).nivelRiesgo as any;
+    const ventanaHasta = new Date();
+    const zona = await db.zonaCriticaActiva.create({
+      data: {
+        epiId: g.epiId,
+        centroLat: lat,
+        centroLng: lng,
+        radioM: 400,
+        cantidadHechos: conteo,
+        nivelRiesgo: nivel,
+        ventanaDesde: desde,
+        ventanaHasta,
+        vigente: true,
+      },
+      include: { epi: { select: { codigo: true, nombre: true } } },
+    });
+    out.push(zona);
+  }
+  await logAudit({ actorUserId: actorId, accion: 'recalcular_zonas', recurso: 'mapas', detalle: { zonas: out.length } });
+  return out.map((z) => ({
+    id: z.id,
+    epiId: z.epiId,
+    epiCodigo: z.epi?.codigo ?? null,
+    epiNombre: z.epi?.nombre ?? null,
+    centroLat: z.centroLat,
+    centroLng: z.centroLng,
+    radioM: z.radioM != null ? Number(z.radioM) : null,
+    poligono: z.poligono,
+    direccion: z.direccion,
+    cantidadHechos: z.cantidadHechos,
+    nivelRiesgo: z.nivelRiesgo,
+    ventanaDesde: z.ventanaDesde,
+    ventanaHasta: z.ventanaHasta,
+  }));
 }

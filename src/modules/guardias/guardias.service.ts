@@ -91,8 +91,33 @@ async function turnosActivos(): Promise<Map<string, Date>> {
   return new Map(rows.map((r) => [r.guardiaId, r.horainicio]));
 }
 
-export async function listGuardias(includeUbicacion = true): Promise<GuardiaRow[]> {
+export async function listGuardias(
+  includeUbicacion = true,
+  filtros: { q?: string; epiCodigo?: string; estado?: string; estadoOperativo?: string } = {},
+): Promise<GuardiaRow[]> {
+  const where: any = {};
+  if (filtros.epiCodigo) {
+    const epi = await db.epi.findUnique({ where: { codigo: filtros.epiCodigo }, select: { id: true } });
+    if (epi) where.epiId = epi.id;
+    else where.epiId = '__none__';
+  }
+  if (filtros.estado) where.estado = filtros.estado;
+  if (filtros.estadoOperativo) where.estadoOperativo = filtros.estadoOperativo;
+  if (filtros.q) {
+    const q = filtros.q.trim();
+    if (q) {
+      where.OR = [
+        { primerNombre: { contains: q, mode: 'insensitive' } },
+        { apellidoPaterno: { contains: q, mode: 'insensitive' } },
+        { apellidoMaterno: { contains: q, mode: 'insensitive' } },
+        { ci: { contains: q } },
+        { usuario: { contains: q, mode: 'insensitive' } },
+        { telefono: { contains: q } },
+      ];
+    }
+  }
   const guardias = await db.guardia.findMany({
+    where: Object.keys(where).length ? where : undefined,
     orderBy: { createdAt: 'desc' },
     include: { epi: { select: { codigo: true, nombre: true } } },
   });
@@ -214,16 +239,19 @@ export async function setEstadoCuenta(id: string, estado: EstadoCuentaGuardia, a
 }
 
 export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOperativo, actorId: string): Promise<GuardiaRow> {
+  const prev = await db.guardia.findUnique({ where: { id }, select: { estadoOperativo: true } });
+  if (!prev) throw Errors.notFound('Guardía no encontrado.');
   try {
     await db.guardia.update({ where: { id }, data: { estadoOperativo } });
   } catch {
     throw Errors.notFound('Guardía no encontrado.');
   }
-
   // El SOS real vive en la última fila de guardia_telemetria (esSos/sosEstado),
-  // no en guardia.estadoOperativo — sin esto, "resolver" un SOS desde este
-  // endpoint deja el pin del mapa y el KPI del Dashboard marcados como SOS
-  // para siempre hasta el próximo ping GPS del guardia.
+  // no en guardia.estadoOperativo — pueden desincronizarse (ver reporte
+  // 2026-09-13 §2.1), así que esto NO se condiciona a que `prev` haya sido
+  // 'emergencia': se limpia cualquier ping SOS pendiente cada vez que el
+  // nuevo estado no es 'emergencia', sin importar de dónde venía. Blindado
+  // por test (guardias.service.test.ts).
   if (estadoOperativo !== 'emergencia') {
     const lastSos = await db.guardiaTelemetria.findFirst({
       where: { guardiaId: id, esSos: true },
@@ -236,11 +264,14 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
       });
     }
   }
-
   const guardia = await getGuardia(id);
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `guardia_operativo_${estadoOperativo}`, recurso: 'guardias', recursoId: id });
   publish(EVENTS.guardiaUbicacion, { guardiaId: id, estadoOperativo, estado: guardia.estado });
+  // Publicar también cambio de telemetría para que el mapa refresque el pin de inmediato
+  if (prev.estadoOperativo === 'emergencia' && estadoOperativo === 'en_servicio') {
+    publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado });
+  }
   return guardia;
 }
 
