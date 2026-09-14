@@ -1,8 +1,12 @@
-﻿import { Router } from 'express';
-import { z } from 'zod';
-import { asyncHandler, validate } from '@shared/index';
-import type { TokenService } from '@modules/auth/application/token.service';
-import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/middlewares';
+﻿import { Router } from "express";
+import { z } from "zod";
+import { asyncHandler, validate } from "@shared/index";
+import type { TokenService } from "@modules/auth/application/token.service";
+import {
+  authenticate,
+  authorize,
+  type AuthRequest,
+} from "@modules/auth/http/middlewares";
 import {
   createGuardia,
   getGuardia,
@@ -10,7 +14,7 @@ import {
   setEstadoCuenta,
   setEstadoOperativo,
   updateGuardia,
-} from './guardias.service.js';
+} from "./guardias.service.js";
 
 const updateSchema = z.object({
   primerNombre: z.string().trim().min(2).max(60).optional(),
@@ -31,7 +35,9 @@ const createSchema = z.object({
   apellidoMaterno: z.string().trim().min(2).max(60),
   ci: z.string().trim().min(4).max(20),
   telefono: z.string().trim().max(20),
-  fechaNacimiento: z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/, 'Fecha inválida (DD/MM/AAAA).'),
+  fechaNacimiento: z
+    .string()
+    .regex(/^\d{2}\/\d{2}\/\d{4}$/, "Fecha inválida (DD/MM/AAAA)."),
   epiCodigo: z.string().trim().max(40).optional().nullable(),
 });
 
@@ -39,17 +45,21 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
   const router = Router();
   router.use(authenticate(tokens));
 
-router.get(
-    '/',
-    authorize('guardias', 'ver'),
-    asyncHandler(async (_req, res) => {
-      res.json({ data: await listGuardias() });
+  router.get(
+    "/",
+    authorize("guardias", "ver"),
+    asyncHandler(async (req, res) => {
+      const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+      const epi = typeof req.query.epi === 'string' ? req.query.epi : typeof req.query.epiCodigo === 'string' ? req.query.epiCodigo : undefined;
+      const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
+      const estadoOperativo = typeof req.query.estadoOperativo === 'string' ? req.query.estadoOperativo : undefined;
+      res.json({ data: await listGuardias(true, { q, epiCodigo: epi, estado, estadoOperativo }) });
     }),
   );
 
   router.post(
-    '/',
-    authorize('guardias', 'crear'),
+    "/",
+    authorize("guardias", "crear"),
     asyncHandler(async (req: AuthRequest, res) => {
       const input = validate(createSchema, req.body);
       const fechaNacimiento = new Date(
@@ -67,18 +77,23 @@ router.get(
   );
 
   router.get(
-    '/:id',
-    authorize('guardias', 'ver'),
+    "/:id",
+    authorize("guardias", "ver"),
     asyncHandler(async (req, res) => {
       const guardia = await getGuardia(req.params.id!!);
-      if (!guardia) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'GuardÃ­a no encontrado.' } });
+      if (!guardia)
+        return res
+          .status(404)
+          .json({
+            error: { code: "NOT_FOUND", message: "GuardÃ­a no encontrado." },
+          });
       res.json({ data: guardia });
     }),
   );
 
   router.patch(
-    '/:id',
-    authorize('guardias', 'editar'),
+    "/:id",
+    authorize("guardias", "editar"),
     asyncHandler(async (req, res) => {
       const patch = validate(updateSchema, req.body);
       const guardia = await updateGuardia(req.params.id!, patch);
@@ -87,31 +102,44 @@ router.get(
   );
 
   router.patch(
-    '/:id/estado',
-    authorize('guardias', 'editar'),
+    "/:id/estado",
+    authorize("guardias", "editar"),
     asyncHandler(async (req: AuthRequest, res) => {
       const { estado } = validate(
-        z.object({ estado: z.enum(['activo', 'inactivo', 'suspendido']) }),
+        z.object({ estado: z.enum(["activo", "inactivo", "suspendido"]) }),
         req.body,
       );
-      const guardia = await setEstadoCuenta(req.params.id!, estado, req.principal!.id);
+      const guardia = await setEstadoCuenta(
+        req.params.id!,
+        estado,
+        req.principal!.id,
+      );
       res.json({ data: guardia });
     }),
   );
 
   router.patch(
-    '/:id/estado-operativo',
-    authorize('guardias', 'editar'),
+    "/:id/estado-operativo",
+    authorize("guardias", "editar"),
     asyncHandler(async (req: AuthRequest, res) => {
       const { estadoOperativo } = validate(
-        z.object({ estadoOperativo: z.enum(['fuera_de_servicio', 'en_servicio', 'emergencia']) }),
+        z.object({
+          estadoOperativo: z.enum([
+            "fuera_de_servicio",
+            "en_servicio",
+            "emergencia",
+          ]),
+        }),
         req.body,
       );
-      const guardia = await setEstadoOperativo(req.params.id!, estadoOperativo, req.principal!.id);
+      const guardia = await setEstadoOperativo(
+        req.params.id!,
+        estadoOperativo,
+        req.principal!.id,
+      );
       res.json({ data: guardia });
     }),
   );
 
   return router;
 }
-
