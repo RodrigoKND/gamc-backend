@@ -58,14 +58,18 @@ export interface SessionLike {
 export function setSessionCookies(res: Response, session: SessionLike, xsrf: string): void {
   res.cookie(COOKIES.access, session.accessToken, ACCESS_OPTIONS);
   res.cookie(COOKIES.refresh, session.refreshToken, REFRESH_OPTIONS);
+  // FIX 2026-09-18: perfil y xsrf antes expiraban a los 15 min (ACCESS_TOKEN_MINUTES)
+  // por eso la web mostraba "Invitado" aunque el refresh siguiera vigente 7 días.
+  // Ahora viven lo mismo que el refresh — el JWT httpOnly sigue siendo quien
+  // decide el acceso real, el perfil solo es espejo para la UI.
   res.cookie(COOKIES.profile, serializeProfile(session.principal), {
     ...BASE_OPTIONS,
-    maxAge: env.ACCESS_TOKEN_MINUTES * 60 * 1000,
+    maxAge: env.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
   });
   // No httpOnly de propósito: la web necesita leerla para mandar el header.
   res.cookie(COOKIES.xsrf, xsrf, {
     ...BASE_OPTIONS,
-    maxAge: env.ACCESS_TOKEN_MINUTES * 60 * 1000,
+    maxAge: env.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
   });
 }
 
