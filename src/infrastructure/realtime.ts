@@ -50,7 +50,16 @@ export function initRealtime(
   });
 
   io.use((socket, next) => {
-    const access = readAccessCookie(socket.handshake.headers.cookie ?? '');
+    // El navegador conecta DIRECTO a este servidor (dominio de Render), no a
+    // través del proxy same-origin que usa el resto de la app — por eso la
+    // cookie httpOnly `gamc_access` (seteada en el dominio de Vercel) casi
+    // nunca llega acá en producción. `handshake.auth.token` es el mecanismo
+    // real de auth en ese caso: el frontend lo obtiene con una Server Action
+    // que sí puede leer la cookie httpOnly, y lo pasa explícitamente al
+    // conectar. La cookie sigue soportada como fallback (funciona en local,
+    // donde front y back comparten dominio/puerto de confianza).
+    const tokenFromAuth = typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : undefined;
+    const access = tokenFromAuth ?? readAccessCookie(socket.handshake.headers.cookie ?? '');
     if (!access) return next(new Error('unauthorized'));
     verifyAccess(access)
       .then((claims) => {
