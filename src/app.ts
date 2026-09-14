@@ -27,7 +27,7 @@ import type { Container } from './composition.js';
 export function createApp(c: Container): express.Express {
   const app = express();
 
-  app.set('trust proxy', true);
+  app.set('trust proxy', '127.0.0.1');
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(compression({ threshold: 0 }));

@@ -22,13 +22,13 @@ const BASE_OPTIONS = {
   path: '/',
 };
 
-// El refresh solo viaja hacia /api/auth/refresh — si un script intenta
-// usarlo en otro endpoint, la cookie simplemente no se envía.
+// Refresh con path '/' para que el middleware y cualquier Server Action pueda
+// ver la cookie y hacer refresh silencioso sin redirigir a /login cada 15 min
 const REFRESH_OPTIONS = {
   httpOnly: true,
   secure: env.COOKIE_SECURE,
   sameSite: 'lax' as const,
-  path: '/api/auth/refresh',
+  path: '/',
   maxAge: env.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
 };
 

@@ -70,10 +70,12 @@ export function buildHechosRouter(tokens: TokenService): Router {
         const q = typeof req.query.q === 'string' ? req.query.q : undefined;
         const tipo = typeof req.query.tipo === 'string' ? req.query.tipo : undefined;
         const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
-        const epiId = typeof req.query.epiId === 'string' ? req.query.epiId : undefined;
+        const epiId = typeof req.query.epiId === 'string' ? req.query.epiId : typeof req.query.epi === 'string' ? req.query.epi : undefined;
         const desde = typeof req.query.desde === 'string' ? req.query.desde : undefined;
         const hasta = typeof req.query.hasta === 'string' ? req.query.hasta : undefined;
-        listHechos({ q, tipo, estado, epiId, desde, hasta })
+        const limit = req.query.limit ? Number(req.query.limit) : undefined;
+        const offset = req.query.offset ? Number(req.query.offset) : undefined;
+        listHechos({ q, tipo, estado, epiId, desde, hasta, limit, offset })
           .then((data) => res.json({ data }))
           .catch(next);
       });
