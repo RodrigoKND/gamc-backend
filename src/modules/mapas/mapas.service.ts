@@ -151,8 +151,8 @@ export interface CrearRutaPlantillaInput {
 // activo=true) — una ruta creada con activo=false igual queda disponible
 // para que `patrulla.rutaPlantillaId` la referencie y agrupe guardias.
 export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
-  if (input.trazado.length < 2 || input.trazado.length > 5) {
-    throw Errors.validation('El trazado de la ruta necesita entre 2 y 5 puntos.');
+  if (input.trazado.length < 2 || input.trazado.length > 2000) {
+    throw Errors.validation('El trazado de la ruta necesita entre 2 y 2000 puntos.');
   }
   const ruta = await db.rutaPlantilla.create({
     data: {
@@ -182,6 +182,77 @@ export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
     trazado: ruta.trazado,
     activo: ruta.activo,
   };
+}
+
+// RF-G3-09 (rediseño de rutas 2026-09-14): cancela TODAS las filas
+// `patrulla` vigentes (estado asignada|en_curso) que comparten un mismo
+// `rutaPlantillaId` — "cancelar la ruta" es una acción sobre la ruta
+// compartida, no sobre un guardia individual (para sacar a un solo guardia
+// de una ruta grupal sin tocar a los demás haría falta un endpoint aparte,
+// no pedido todavía). No borra la fila (soft-cancel, `estado='cancelada'`)
+// para no perder el historial/auditoría — igual que `cerrarTurno` reusa
+// `completadaEn` como "cuándo dejó de estar vigente" para cualquier estado
+// terminal, no solo 'completada'.
+export async function cancelarRuta(rutaPlantillaId: string, actorUserId: string) {
+  const vigentes = await db.patrulla.findMany({
+    where: { rutaPlantillaId, estado: { in: ['asignada', 'en_curso'] } },
+    select: { id: true, guardiaId: true },
+  });
+  if (vigentes.length === 0) {
+    throw Errors.notFound('No hay guardias con esta ruta vigente para cancelar.');
+  }
+
+  await db.patrulla.updateMany({
+    where: { id: { in: vigentes.map((p) => p.id) } },
+    data: { estado: 'cancelada', completadaEn: new Date() },
+  });
+
+  await logAudit({
+    actorUserId,
+    accion: 'cancelar_ruta',
+    recurso: 'patrullaje',
+    recursoId: rutaPlantillaId,
+    detalle: { patrullasCanceladas: vigentes.map((p) => p.id) },
+  });
+  publish(EVENTS.patrullaCancelada, {
+    rutaPlantillaId,
+    guardiaIds: vigentes.map((p) => p.guardiaId),
+  });
+
+  return { rutaPlantillaId, cancelados: vigentes.length };
+}
+
+// Complemento de cancelarRuta (pedido explícito 2026-09-14): sacar a UN
+// guardia (o varios, de a uno) de una ruta compartida sin tocar a los
+// demás — cancela solo su propia fila `patrulla`, no las del resto del
+// grupo. Mismo criterio soft-cancel que cancelarRuta.
+export async function cancelarPatrulla(patrullaId: string, actorUserId: string) {
+  const patrulla = await db.patrulla.findUnique({
+    where: { id: patrullaId },
+    select: { id: true, guardiaId: true, rutaPlantillaId: true, estado: true },
+  });
+  if (!patrulla || !['asignada', 'en_curso'].includes(patrulla.estado)) {
+    throw Errors.notFound('No hay una asignación vigente con ese id para cancelar.');
+  }
+
+  await db.patrulla.update({
+    where: { id: patrullaId },
+    data: { estado: 'cancelada', completadaEn: new Date() },
+  });
+
+  await logAudit({
+    actorUserId,
+    accion: 'cancelar_patrulla',
+    recurso: 'patrullaje',
+    recursoId: patrullaId,
+    detalle: { guardiaId: patrulla.guardiaId, rutaPlantillaId: patrulla.rutaPlantillaId },
+  });
+  publish(EVENTS.patrullaCancelada, {
+    rutaPlantillaId: patrulla.rutaPlantillaId,
+    guardiaIds: [patrulla.guardiaId],
+  });
+
+  return { patrullaId, guardiaId: patrulla.guardiaId };
 }
 
 export async function zonasCriticas() {

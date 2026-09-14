@@ -7,6 +7,8 @@ import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/mi
 import { recorridoQuery } from '@modules/turnos/turnos.service';
 import {
   asignarPatrulla,
+  cancelarPatrulla,
+  cancelarRuta,
   crearRutaPlantilla,
   patrullasVigentes,
   rutasPlantilla,
@@ -24,12 +26,15 @@ const asignarSchema = z.object({
 });
 
 // [lng, lat] pelado (no envuelto en GeoJSON) — ver comentario en
-// mapas.service.ts:crearRutaPlantilla sobre por qué.
+// mapas.service.ts:crearRutaPlantilla sobre por qué. El trazado ya viene
+// ruteado por calles desde la Web (routing.ts, OSRM) — no son los 2-5
+// puntos que clickeó el Operador, es el camino real con muchos vértices
+// (rediseño 2026-09-14: "debe ir por las calles").
 const crearRutaSchema = z.object({
   nombre: z.string().trim().min(1).max(120),
   descripcion: z.string().trim().max(500).optional().nullable(),
   epiId: z.string().uuid().optional().nullable(),
-  trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(5),
+  trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(2000),
   activo: z.boolean().optional(),
 });
 
@@ -73,6 +78,35 @@ export function buildMapasRouter(tokens: TokenService): Router {
       const input = validate(crearRutaSchema, req.body);
       const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id });
       res.status(201).json({ data: ruta });
+    }),
+  );
+
+  // Cancela una ruta compartida: TODOS los guardias vigentes en esa
+  // rutaPlantillaId quedan 'cancelada' y desaparecen del Mapa de
+  // Patrullaje en Vivo (getGuardMarkers en la Web sigue mostrando el pin
+  // por telemetría si el guardia sigue en_servicio — lo que desaparece es
+  // la línea de ruta y su agrupación en el panel, no el guardia). Mismo
+  // permiso que editar una patrulla (`patrullaje:editar`) — el Operador ya
+  // lo tiene, cancelar no es "eliminar" (la fila se conserva para auditoría).
+  router.patch(
+    '/rutas/:id/cancelar',
+    authorize('patrullaje', 'editar'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const resultado = await cancelarRuta(req.params.id!, req.principal!.id);
+      res.json({ data: resultado });
+    }),
+  );
+
+  // Complemento: cancela UN guardia de una ruta compartida sin tocar a los
+  // demás (pedido explícito 2026-09-14 — "poder eliminar por guardia por si
+  // solo queremos eliminar uno o varios pero no toda la ruta"). Mismo
+  // permiso/criterio que cancelar la ruta completa.
+  router.patch(
+    '/patrullas/:id/cancelar',
+    authorize('patrullaje', 'editar'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const resultado = await cancelarPatrulla(req.params.id!, req.principal!.id);
+      res.json({ data: resultado });
     }),
   );
 

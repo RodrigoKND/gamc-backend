@@ -26,6 +26,7 @@ export const EVENTS = {
   sosNuevo: 'sos:nuevo',
   hechoActualizado: 'hecho:actualizado',
   patrullaAsignada: 'patrulla:asignada',
+  patrullaCancelada: 'patrulla:cancelada',
   telemetria: 'telemetria',
 } as const;
 

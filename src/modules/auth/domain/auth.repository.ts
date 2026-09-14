@@ -49,6 +49,8 @@ export interface AuthRepository {
   updateGuardiaPassword(guardiaId: string, passwordHash: string, tx?: Tx): Promise<void>;
   /** Marca la cuenta como activa y aclara el flag de primer login (activación web/guardia). */
   activateUser(userId: string, tx?: Tx): Promise<void>;
+  /** `pendiente_activacion` es solo informativo ("¿ya inició sesión alguna vez?") — este marca ese primer login, sin tocar contraseña ni ningún otro campo. */
+  activateGuardia(guardiaId: string, tx?: Tx): Promise<void>;
 
   /** Almacena el hash del código de recuperación; revoca códigos previos sin usar. */
   storeResetCode(record: {

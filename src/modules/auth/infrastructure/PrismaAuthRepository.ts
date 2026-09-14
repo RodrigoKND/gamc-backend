@@ -151,6 +151,13 @@ export class PrismaAuthRepository implements AuthRepository {
     await this.client.user.update({ where: { id: userId }, data: { estado: 'activo' } });
   }
 
+  async activateGuardia(guardiaId: string): Promise<void> {
+    await this.client.guardia.update({
+      where: { id: guardiaId },
+      data: { estado: 'activo', activadoEn: new Date() },
+    });
+  }
+
   async storeResetCode(record: {
     sujetoTipo: SujetoTipo;
     sujetoId: string;
