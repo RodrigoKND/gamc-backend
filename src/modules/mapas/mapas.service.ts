@@ -123,7 +123,65 @@ export async function rutasPlantilla() {
     epiCodigo: r.epi?.codigo ?? null,
     epiNombre: r.epi?.nombre ?? null,
     trazado: r.trazado,
+    activo: r.activo,
   }));
+}
+
+export interface CrearRutaPlantillaInput {
+  nombre: string;
+  descripcion?: string | null;
+  epiId?: string | null;
+  /**
+   * [lng, lat][] pelado — NO un objeto GeoJSON `{type,coordinates}`. La app
+   * móvil ya lee `ruta_plantilla.trazado` con ese formato en producción
+   * (`appmunicipal/src/api/patrullas.ts:trazadoAZona`), así que se guarda
+   * exactamente así para no romper esa lectura ya existente.
+   */
+  trazado: [number, number][];
+  activo?: boolean;
+  creadoPorId: string;
+}
+
+// RF-G3-09 (rediseño de rutas 2026-09-14, Web): antes no existía forma de
+// crear una `ruta_plantilla` desde ningún cliente (GET /mapas/rutas era de
+// solo lectura) — el Operador no podía compartir una misma ruta entre
+// varios guardias porque no había dónde guardar el trazado. `activo` ya NO
+// significa "existe" sino "aparece en el selector de plantillas
+// reutilizables" (ver rutasPlantilla() arriba, que sigue filtrando por
+// activo=true) — una ruta creada con activo=false igual queda disponible
+// para que `patrulla.rutaPlantillaId` la referencie y agrupe guardias.
+export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
+  if (input.trazado.length < 2 || input.trazado.length > 5) {
+    throw Errors.validation('El trazado de la ruta necesita entre 2 y 5 puntos.');
+  }
+  const ruta = await db.rutaPlantilla.create({
+    data: {
+      nombre: input.nombre,
+      descripcion: input.descripcion ?? null,
+      epiId: input.epiId ?? null,
+      trazado: input.trazado as Prisma.InputJsonValue,
+      activo: input.activo ?? true,
+      creadoPorId: input.creadoPorId,
+    },
+    include: { epi: { select: { codigo: true, nombre: true } } },
+  });
+  await logAudit({
+    actorUserId: input.creadoPorId,
+    accion: 'crear_ruta_plantilla',
+    recurso: 'patrullaje',
+    recursoId: ruta.id,
+    detalle: { nombre: ruta.nombre, puntos: input.trazado.length, activo: ruta.activo },
+  });
+  return {
+    id: ruta.id,
+    nombre: ruta.nombre,
+    descripcion: ruta.descripcion,
+    epiId: ruta.epiId,
+    epiCodigo: ruta.epi?.codigo ?? null,
+    epiNombre: ruta.epi?.nombre ?? null,
+    trazado: ruta.trazado,
+    activo: ruta.activo,
+  };
 }
 
 export async function zonasCriticas() {
