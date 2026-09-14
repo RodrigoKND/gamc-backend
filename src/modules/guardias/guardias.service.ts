@@ -267,10 +267,21 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
   const guardia = await getGuardia(id);
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `guardia_operativo_${estadoOperativo}`, recurso: 'guardias', recursoId: id });
-  publish(EVENTS.guardiaUbicacion, { guardiaId: id, estadoOperativo, estado: guardia.estado });
-  // Publicar también cambio de telemetría para que el mapa refresque el pin de inmediato
-  if (prev.estadoOperativo === 'emergencia' && estadoOperativo === 'en_servicio') {
-    publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado });
+  // Incluir esSos:false para que el handler optimista de MapasView limpie el SOS al instante
+  // (antes el payload no tenía esSos y el frontend hacía payload.esSos ?? cur.hasSos -> se quedaba en true)
+  const esSosResuelto = estadoOperativo !== 'emergencia' ? false : undefined;
+  publish(EVENTS.guardiaUbicacion, {
+    guardiaId: id,
+    estadoOperativo,
+    estado: guardia.estado,
+    ...(esSosResuelto !== undefined ? { esSos: esSosResuelto, sosEstado: 'atendido' } : {}),
+  });
+  // Emitir guardia:estado siempre que se sale de emergencia para forzar reload completo
+  // (antes solo si prev==='emergencia' && nuevo==='en_servicio', dejaba casos desincronizados sin refresh)
+  if (estadoOperativo !== 'emergencia') {
+    publish(EVENTS.guardiaEstado, { guardiaId: id, estadoOperativo, estado: guardia.estado, esSos: false });
+    // También emitir sos:nuevo con esSos false para que GlobalSosBanner/notificaciones se enteren al instante
+    publish(EVENTS.sosNuevo, { guardiaId: id, esSos: false, estadoOperativo });
   }
   return guardia;
 }

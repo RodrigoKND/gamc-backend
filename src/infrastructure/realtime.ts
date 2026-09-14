@@ -27,6 +27,7 @@ export const EVENTS = {
   hechoActualizado: 'hecho:actualizado',
   patrullaAsignada: 'patrulla:asignada',
   patrullaCancelada: 'patrulla:cancelada',
+  mandadoNuevo: 'mandado:nuevo',
   telemetria: 'telemetria',
 } as const;
 
