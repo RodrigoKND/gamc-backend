@@ -27,7 +27,14 @@ import type { Container } from './composition.js';
 export function createApp(c: Container): express.Express {
   const app = express();
 
-  app.set('trust proxy', true);
+  // `true` confía en CUALQUIER cantidad de saltos de proxy (cualquiera podría
+  // falsificar X-Forwarded-For) — express-rate-limit lo detecta y lo rechaza
+  // en caliente (ValidationError: ERR_ERL_PERMISSIVE_TRUST_PROXY), tirando
+  // 503 en request al azar cuando el módulo de rate-limit se re-evalúa. `1`
+  // confía solo en el primer salto — exactamente el proxy único de Render en
+  // producción — y sigue arreglando el problema original (detectar HTTPS
+  // real vía X-Forwarded-Proto para las cookies `secure`) sin la alarma.
+  app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(compression({ threshold: 0 }));
