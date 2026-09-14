@@ -4,6 +4,7 @@ import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
+import { peekAddress, reverseGeocode } from '@modules/mapas/geocoding.service.js';
 
 export interface HechoRow {
   id: string;
@@ -42,6 +43,13 @@ const HECHO_INCLUDE = {
   evidencias: true,
 } as const;
 
+// Un hecho sin `direccion` guardada (el celular no siempre la manda, ver
+// crearHechoMovil) cae acá — mismo patrón que ya usa /mapas/ubicaciones:
+// `peekAddress` es síncrono (no bloquea un listado de 200 filas contra el
+// límite de Nominatim de 1 req/segundo), devuelve la dirección si ya está
+// en caché o dispara la resolución en segundo plano para el próximo
+// refresh. Pedido explícito 2026-09-14: la Web NUNCA debe mostrar lat/lng
+// crudos, siempre lenguaje natural.
 function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, includeGuardiaNombre = true): HechoRow {
   return {
     id: row.id,
@@ -51,7 +59,7 @@ function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, i
     nivelRiesgo: row.nivelRiesgo,
     lat: row.lat,
     lng: row.lng,
-    direccion: row.direccion,
+    direccion: row.direccion ?? peekAddress(row.lat, row.lng) ?? null,
     ocurridoEn: row.ocurridoEn,
     reportadoEn: row.reportadoEn,
     estado: row.estado,
@@ -144,6 +152,13 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
     turnoId = abierto?.id ?? null;
   }
 
+  // Alta de un solo hecho (no un listado) — sí puede esperar la resolución
+  // real (a diferencia de toRow/peekAddress en los listados): así el
+  // detalle queda con dirección legible desde el primer momento en vez de
+  // depender de un refresh posterior. Solo se llama si el celular no mandó
+  // una dirección ya resuelta.
+  const direccion = input.direccion ?? (await reverseGeocode(input.lat, input.lng));
+
   const created = await db.hecho.create({
     data: {
       guardiaId: input.guardiaId,
@@ -154,7 +169,7 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
       lat: input.lat,
       lng: input.lng,
       epiId: guardia.epiId,
-      direccion: input.direccion ?? null,
+      direccion,
       ocurridoEn: input.ocurridoEn ?? new Date(),
       estado: 'reportado',
       ...(input.evidencias && input.evidencias.length > 0

@@ -5,6 +5,7 @@ import { nombreCompleto } from '@shared/names';
 import { PasswordService } from '@modules/auth/application/password.service';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
+import { peekAddress } from '@modules/mapas/geocoding.service.js';
 
 export type EstadoOperativo = 'fuera_de_servicio' | 'en_servicio' | 'emergencia';
 export type EstadoCuentaGuardia = 'pendiente_activacion' | 'activo' | 'inactivo' | 'suspendido';
@@ -12,6 +13,7 @@ export type EstadoCuentaGuardia = 'pendiente_activacion' | 'activo' | 'inactivo'
 export interface GuardiaUbicacion {
   lat: number;
   lng: number;
+  direccion: string | null;
   precisionM: number | null;
   bateriaPct: number | null;
   esSos: boolean;
@@ -70,6 +72,7 @@ async function ultimaPosicion(guardiaIds: string[]): Promise<Map<string, Guardia
     map.set(row.guardiaId, {
       lat: row.lat,
       lng: row.lng,
+      direccion: peekAddress(row.lat, row.lng) ?? null,
       precisionM: row.precisionM != null ? Number(row.precisionM) : null,
       bateriaPct: row.bateriaPct,
       esSos: row.esSos,

@@ -97,7 +97,10 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
     }
     await tx.guardia.update({
       where: { id: input.guardiaId },
-      data: { estadoOperativo: 'en_servicio' },
+      // La selfie de inicio de turno pasa a ser la foto vigente del guardia
+      // en Guardias (Web) — se actualiza en la misma transacción que el
+      // estado operativo para que ambos cambien a la vez, nunca por separado.
+      data: { estadoOperativo: 'en_servicio', fotoUrl: input.selfieInicioUrl },
     });
     return created;
   });

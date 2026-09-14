@@ -72,6 +72,10 @@ export class InMemoryAuthRepository implements AuthRepository {
     void 0;
   }
 
+  async activateGuardia(): Promise<void> {
+    void 0;
+  }
+
   async activateUser(userId: string): Promise<void> {
     const u = this.users.get(userId);
     if (u) this.users.set(userId, { ...u, estado: 'activo', debeCambiarPassword: false });

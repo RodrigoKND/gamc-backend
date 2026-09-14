@@ -135,11 +135,20 @@ export class AuthService {
   ): Promise<GuardiaAuthResponse> {
     const guardia = await this.deps.repo.findGuardiaByIdentifier(usuario);
     if (!guardia) throw Errors.invalidCredentials();
-    if (guardia.estado === 'pendiente_activacion') throw Errors.guardiaPendienteActivacion();
-    if (guardia.estado !== 'activo') throw Errors.accountDisabled();
+    // `pendiente_activacion` es solo informativo ("¿ya inició sesión antes?"),
+    // no debe bloquear el login — la contraseña que se generó al crear la
+    // cuenta ya es real y usable. Solo 'inactivo'/'suspendido' bloquean.
+    if (guardia.estado !== 'activo' && guardia.estado !== 'pendiente_activacion') {
+      throw Errors.accountDisabled();
+    }
 
     const ok = await PasswordService.verify(password, guardia.passwordHash);
     if (!ok) throw Errors.invalidCredentials();
+
+    if (guardia.estado === 'pendiente_activacion') {
+      await this.deps.repo.activateGuardia(guardia.id);
+      guardia.estado = 'activo';
+    }
 
     return this.issueGuardiaSession(guardia, meta, 'login');
   }
