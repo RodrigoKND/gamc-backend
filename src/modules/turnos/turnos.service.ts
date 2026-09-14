@@ -118,6 +118,16 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
     estadoOperativo: 'en_servicio',
     turnoId: turno.id,
   });
+  // Si el guardia tenía una patrulla asignada, ahora pasa a en_curso — el
+  // mapa de la web debe enterarse sin esperar polling.
+  if (patrulla) {
+    publish(EVENTS.patrullaAsignada, {
+      id: patrulla.id,
+      guardiaId: input.guardiaId,
+      estado: 'en_curso',
+      turnoId: turno.id,
+    });
+  }
   return toRow(turno);
 }
 
