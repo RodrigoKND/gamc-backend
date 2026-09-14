@@ -7,6 +7,7 @@ import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/mi
 import { recorridoQuery } from '@modules/turnos/turnos.service';
 import {
   asignarPatrulla,
+  crearRutaPlantilla,
   patrullasVigentes,
   rutasPlantilla,
   ubicacionesActuales,
@@ -20,6 +21,16 @@ const asignarSchema = z.object({
   nombre: z.string().trim().max(120).optional().nullable(),
   descripcion: z.string().trim().max(500).optional().nullable(),
   poligonoGeojson: z.unknown().optional().nullable(),
+});
+
+// [lng, lat] pelado (no envuelto en GeoJSON) — ver comentario en
+// mapas.service.ts:crearRutaPlantilla sobre por qué.
+const crearRutaSchema = z.object({
+  nombre: z.string().trim().min(1).max(120),
+  descripcion: z.string().trim().max(500).optional().nullable(),
+  epiId: z.string().uuid().optional().nullable(),
+  trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(5),
+  activo: z.boolean().optional(),
 });
 
 export function buildMapasRouter(tokens: TokenService): Router {
@@ -47,6 +58,21 @@ export function buildMapasRouter(tokens: TokenService): Router {
     authorize('mapas', 'ver'),
     asyncHandler(async (_req, res) => {
       res.json({ data: await rutasPlantilla() });
+    }),
+  );
+
+  // Rediseño de rutas (RF-G3-09, 2026-09-14, Web): antes no existía forma
+  // de crear una `ruta_plantilla` — GET era de solo lectura. Necesario para
+  // que el Operador pueda compartir un mismo trazado entre varios guardias
+  // (patrulla.rutaPlantillaId). Mismo permiso que asignar una patrulla
+  // (`patrullaje:crear`) — es parte del mismo flujo de asignación.
+  router.post(
+    '/rutas',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const input = validate(crearRutaSchema, req.body);
+      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id });
+      res.status(201).json({ data: ruta });
     }),
   );
 
