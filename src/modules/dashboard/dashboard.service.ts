@@ -33,13 +33,18 @@ interface DiaRow { dia: string; total: bigint }
 interface TipoRow { tipo: string; total: bigint }
 interface ZonaRow { zona: string | null; total: bigint }
 
+// generate_series + LEFT JOIN en vez de un GROUP BY simple: un GROUP BY puro
+// nunca produce una fila para un día sin hechos, así que la gráfica del
+// dashboard omitía esos días en vez de mostrarlos en 0 (un día realmente
+// tranquilo se veía igual que un día sin datos todavía).
 export async function hechosPorDia(dias = 7) {
+  const n = Math.max(1, Math.min(30, dias));
   const rows = await db.$queryRaw<DiaRow[]>`
-    select to_char(ocurrido_en, 'YYYY-MM-DD') as dia, count(*)::bigint as total
-    from hecho
-    where ocurrido_en >= now() - make_interval(days => ${Math.max(1, Math.min(30, dias))}::int)
-    group by 1
-    order by 1`;
+    select to_char(d.dia, 'YYYY-MM-DD') as dia, coalesce(count(h.id), 0)::bigint as total
+    from generate_series(current_date - (${n}::int - 1), current_date, interval '1 day') as d(dia)
+    left join hecho h on h.ocurrido_en::date = d.dia
+    group by d.dia
+    order by d.dia`;
   return rows.map((r) => ({ dia: r.dia, total: Number(r.total) }));
 }
 

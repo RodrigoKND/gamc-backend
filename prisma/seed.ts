@@ -62,7 +62,7 @@ const ROLE_PERMISOS: Record<string, ReadonlyArray<readonly [string, boolean, boo
     ['reportes', true, false, false, false],
   ],
   operador_monitoreo: [
-    ['guardias', true, false, false, false],
+    ['guardias', true, false, true, false],
     ['hechos', true, false, true, false],
     ['patrullaje', true, true, true, false],
     ['mapas', true, false, false, false],
@@ -116,17 +116,6 @@ const USUARIOS = [
 ] as const;
 
 const GUARDIAS = [
-  {
-    usuario: 'b.choque',
-    password: 'Guardia#2025',
-    primerNombre: 'Benjamín',
-    apellidoPaterno: 'Choque',
-    apellidoMaterno: 'Huanca',
-    ci: '7564321',
-    telefono: '73456789',
-    fechaNacimiento: new Date('1994-03-12'),
-    epi: 'norte',
-  },
   {
     usuario: 'k.ferreira',
     password: 'Guardia#2025',

@@ -41,6 +41,7 @@ export interface GuardiaRow {
   createdAt: Date;
   ubicacion: GuardiaUbicacion | null;
   turnoActivo: boolean;
+  turnoInicio: Date | null;
 }
 
 interface LastPoint {
@@ -79,12 +80,12 @@ async function ultimaPosicion(guardiaIds: string[]): Promise<Map<string, Guardia
   return map;
 }
 
-async function turnosActivos(): Promise<Set<string>> {
+async function turnosActivos(): Promise<Map<string, Date>> {
   const rows = await db.turno.findMany({
     where: { estado: 'en_servicio' },
-    select: { guardiaId: true },
+    select: { guardiaId: true, horainicio: true },
   });
-  return new Set(rows.map((r) => r.guardiaId));
+  return new Map(rows.map((r) => [r.guardiaId, r.horainicio]));
 }
 
 export async function listGuardias(includeUbicacion = true): Promise<GuardiaRow[]> {
@@ -118,6 +119,7 @@ export async function listGuardias(includeUbicacion = true): Promise<GuardiaRow[
     createdAt: g.createdAt,
     ubicacion: includeUbicacion ? (posiciones.get(g.id) ?? null) : null,
     turnoActivo: activos.has(g.id),
+    turnoInicio: activos.get(g.id) ?? null,
   }));
 }
 
@@ -152,6 +154,7 @@ export async function getGuardia(id: string): Promise<GuardiaRow & { hechosCount
     createdAt: g.createdAt,
     ubicacion: posiciones.get(g.id) ?? null,
     turnoActivo: activos.has(g.id),
+    turnoInicio: activos.get(g.id) ?? null,
     hechosCount,
     turnosCount,
   };
@@ -213,6 +216,24 @@ export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOper
   } catch {
     throw Errors.notFound('Guardía no encontrado.');
   }
+
+  // El SOS real vive en la última fila de guardia_telemetria (esSos/sosEstado),
+  // no en guardia.estadoOperativo — sin esto, "resolver" un SOS desde este
+  // endpoint deja el pin del mapa y el KPI del Dashboard marcados como SOS
+  // para siempre hasta el próximo ping GPS del guardia.
+  if (estadoOperativo !== 'emergencia') {
+    const lastSos = await db.guardiaTelemetria.findFirst({
+      where: { guardiaId: id, esSos: true },
+      orderBy: { capturadoEn: 'desc' },
+    });
+    if (lastSos && lastSos.sosEstado !== 'atendido') {
+      await db.guardiaTelemetria.update({
+        where: { id: lastSos.id },
+        data: { esSos: false, sosEstado: 'atendido', sosAtendidoPorId: actorId, sosAtendidoEn: new Date() },
+      });
+    }
+  }
+
   const guardia = await getGuardia(id);
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `guardia_operativo_${estadoOperativo}`, recurso: 'guardias', recursoId: id });
