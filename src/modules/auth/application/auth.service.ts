@@ -101,13 +101,14 @@ export class AuthService {
     password: string,
     meta: AuthSessionMetadata,
   ): Promise<LoginResponse> {
+   
     const user = await this.deps.repo.findUserByIdentifier(identifier);
     if (!user) throw Errors.invalidCredentials();
     if (user.estado !== 'activo') throw Errors.accountDisabled();
-
+    
     const passwordOk = await PasswordService.verify(password, user.passwordHash);
     if (!passwordOk) throw Errors.invalidCredentials();
-
+    
     const principal = await buildPrincipal(this.deps.repo, user);
     const session = await this.issueSession('user', user.id, user.nombre, principal, meta);
     await this.deps.repo.updateUserLastLogin(user.id);

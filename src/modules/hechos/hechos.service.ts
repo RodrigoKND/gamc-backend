@@ -22,8 +22,7 @@ export interface HechoRow {
   epiNombre: string | null;
   guardiaNombre: string;
   guardiaId: string;
-  tieneEvidencia: boolean;
-  evidencias: { id: string; url: string; tipo: string }[];
+  evidencias?: { id: string; url: string; tipo: string }[];
 }
 
 export interface HechoFiltros {
@@ -35,14 +34,9 @@ export interface HechoFiltros {
   q?: string;
 }
 
-const HECHO_INCLUDE = {
-  tipoHecho: true,
-  epi: { select: { codigo: true, nombre: true } },
-  guardia: true,
-  evidencias: true,
-} as const;
-
-function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, includeGuardiaNombre = true): HechoRow {
+function toRow(row: Prisma.HechoGetPayload<{
+  include: { tipoHecho: true; epi: { select: { codigo: true; nombre: true } }; guardia: true; evidencias: true };
+}>, includeGuardiaNombre = true): HechoRow {
   return {
     id: row.id,
     tipoHecho: row.tipoHecho.codigo,
@@ -60,12 +54,11 @@ function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, i
     epiNombre: row.epi?.nombre ?? null,
     guardiaNombre: includeGuardiaNombre ? nombreCompleto(row.guardia) : '',
     guardiaId: row.guardiaId,
-    tieneEvidencia: row.evidencias.length > 0,
-    evidencias: row.evidencias.map((e) => ({ id: e.id, url: e.url, tipo: e.tipo })),
+    evidencias: (row as any).evidencias?.map((e: any) => ({ id: e.id, url: e.url, tipo: e.tipo })) ?? [],
   };
 }
 
-export async function listHechos(filtros: HechoFiltros = {}): Promise<HechoRow[]> {
+export async function listHechos(filtros: HechoFiltros & { limit?: number; offset?: number } = {}): Promise<HechoRow[]> {
   const where: Prisma.HechoWhereInput = {};
   if (filtros.tipo) where.tipoHecho = { codigo: filtros.tipo };
   if (filtros.estado) where.estado = filtros.estado as hecho_estado;
@@ -75,13 +68,31 @@ export async function listHechos(filtros: HechoFiltros = {}): Promise<HechoRow[]
     if (filtros.desde) where.ocurridoEn.gte = new Date(filtros.desde);
     if (filtros.hasta) where.ocurridoEn.lte = new Date(filtros.hasta);
   }
-  if (filtros.q) where.descripcion = { contains: filtros.q, mode: 'insensitive' };
+  if (filtros.q) {
+    const q = filtros.q.trim();
+    if (q) {
+      where.OR = [
+        { descripcion: { contains: q, mode: 'insensitive' } },
+        { direccion: { contains: q, mode: 'insensitive' } },
+        { guardia: { OR: [
+          { primerNombre: { contains: q, mode: 'insensitive' } },
+          { apellidoPaterno: { contains: q, mode: 'insensitive' } },
+          { ci: { contains: q } },
+        ]}},
+        { tipoHecho: { label: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+  }
+  const take = Math.min(Math.max(filtros.limit ?? 200, 1), 500);
+  const skip = Math.max(filtros.offset ?? 0, 0);
   const rows = await db.hecho.findMany({
     where,
     orderBy: { ocurridoEn: 'desc' },
-    include: HECHO_INCLUDE,
+    take,
+    skip,
+    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
   });
-  return rows.map((row) => toRow(row));
+  return rows.map((row) => toRow(row as any));
 }
 
 export async function listTiposHecho() {
@@ -109,6 +120,7 @@ export interface CrearHechoMovilInput {
 
 export interface HechoMovilRow extends HechoRow {
   turnoId: string | null;
+  evidencias: { id: string; url: string; tipo: string }[];
 }
 
 // Alta de hecho desde el MÓVIL (BD_UNIFICADA §5.3). El `guardiaId` sale del
@@ -165,7 +177,12 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
           }
         : {}),
     },
-    include: HECHO_INCLUDE,
+    include: {
+      tipoHecho: true,
+      epi: { select: { codigo: true, nombre: true } },
+      guardia: true,
+      evidencias: true,
+    },
   });
 
   await logAudit({
@@ -177,7 +194,11 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
   });
   const base = toRow(created);
   publish(EVENTS.hechoActualizado, base);
-  return { ...base, turnoId: created.turnoId };
+  return {
+    ...base,
+    turnoId: created.turnoId,
+    evidencias: created.evidencias.map((e) => ({ id: e.id, url: e.url, tipo: e.tipo })),
+  };
 }
 
 export async function listHechosDeGuardia(guardiaId: string): Promise<HechoRow[]> {
@@ -185,9 +206,9 @@ export async function listHechosDeGuardia(guardiaId: string): Promise<HechoRow[]
     where: { guardiaId },
     orderBy: { ocurridoEn: 'desc' },
     take: 200,
-    include: HECHO_INCLUDE,
+    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
   });
-  return rows.map((row) => toRow(row));
+  return rows.map((row) => toRow(row as any));
 }
 
 export async function changeHechoEstado(id: string, estado: hecho_estado, actorId: string): Promise<HechoRow> {
@@ -201,10 +222,10 @@ export async function changeHechoEstado(id: string, estado: hecho_estado, actorI
   }
   const row = await db.hecho.findUnique({
     where: { id },
-    include: HECHO_INCLUDE,
+    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
   });
   if (!row) throw Errors.notFound('Hecho no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `hecho_${estado}`, recurso: 'hechos', recursoId: id });
-  publish(EVENTS.hechoActualizado, toRow(row));
-  return toRow(row);
+  publish(EVENTS.hechoActualizado, toRow(row as any));
+  return toRow(row as any);
 }

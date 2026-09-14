@@ -8,7 +8,9 @@ import { recorridoQuery } from '@modules/turnos/turnos.service';
 import {
   asignarPatrulla,
   crearRutaPlantilla,
+  heatmap,
   patrullasVigentes,
+  recalcularZonasCriticas,
   rutasPlantilla,
   ubicacionesActuales,
   zonasCriticas,
@@ -21,16 +23,6 @@ const asignarSchema = z.object({
   nombre: z.string().trim().max(120).optional().nullable(),
   descripcion: z.string().trim().max(500).optional().nullable(),
   poligonoGeojson: z.unknown().optional().nullable(),
-});
-
-// [lng, lat] pelado (no envuelto en GeoJSON) — ver comentario en
-// mapas.service.ts:crearRutaPlantilla sobre por qué.
-const crearRutaSchema = z.object({
-  nombre: z.string().trim().min(1).max(120),
-  descripcion: z.string().trim().max(500).optional().nullable(),
-  epiId: z.string().uuid().optional().nullable(),
-  trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(5),
-  activo: z.boolean().optional(),
 });
 
 export function buildMapasRouter(tokens: TokenService): Router {
@@ -61,26 +53,68 @@ export function buildMapasRouter(tokens: TokenService): Router {
     }),
   );
 
-  // Rediseño de rutas (RF-G3-09, 2026-09-14, Web): antes no existía forma
-  // de crear una `ruta_plantilla` — GET era de solo lectura. Necesario para
-  // que el Operador pueda compartir un mismo trazado entre varios guardias
-  // (patrulla.rutaPlantillaId). Mismo permiso que asignar una patrulla
-  // (`patrullaje:crear`) — es parte del mismo flujo de asignación.
-  router.post(
-    '/rutas',
-    authorize('patrullaje', 'crear'),
-    asyncHandler(async (req: AuthRequest, res) => {
-      const input = validate(crearRutaSchema, req.body);
-      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id });
-      res.status(201).json({ data: ruta });
-    }),
-  );
-
   router.get(
     '/zonas',
     authorize('mapas', 'ver'),
     asyncHandler(async (_req, res) => {
       res.json({ data: await zonasCriticas() });
+    }),
+  );
+
+  router.get(
+    '/heatmap',
+    authorize('mapas', 'ver'),
+    asyncHandler(async (req, res) => {
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+      res.json({
+        data: await heatmap({ desde: str(req.query.desde), hasta: str(req.query.hasta), epiId: str(req.query.epiId) }),
+      });
+    }),
+  );
+
+  router.post(
+    '/zonas/recalcular',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await recalcularZonasCriticas(req.principal!.id) });
+    }),
+  );
+
+  router.post(
+    '/rutas',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const schema = z.object({
+        nombre: z.string().trim().min(2).max(120),
+        descripcion: z.string().trim().max(500).optional().nullable(),
+        epiId: z.string().trim().max(80).optional().nullable(),
+        epiCodigo: z.string().trim().max(40).optional().nullable(),
+        trazado: z.unknown().optional().nullable(),
+      });
+      const input = validate(schema, req.body);
+      let epiId: string | null = null;
+      if (input.epiId) {
+        // Si es uuid lo usamos directo, si es codigo lo resolvemos
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.epiId);
+        if (isUuid) epiId = input.epiId;
+        else {
+          const { db } = await import('@infra/database.js');
+          const epi = await db.epi.findUnique({ where: { codigo: input.epiId } });
+          epiId = epi?.id ?? null;
+        }
+      } else if (input.epiCodigo) {
+        const { db } = await import('@infra/database.js');
+        const epi = await db.epi.findUnique({ where: { codigo: input.epiCodigo } });
+        epiId = epi?.id ?? null;
+      }
+      const row = await crearRutaPlantilla({
+        nombre: input.nombre,
+        descripcion: input.descripcion ?? null,
+        epiId,
+        trazado: input.trazado as Prisma.InputJsonValue | null | undefined,
+        creadoPorId: req.principal!.id,
+      });
+      res.status(201).json({ data: row });
     }),
   );
 

@@ -22,7 +22,7 @@ let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  logger.info({ signal }, 'Apagando...');
+  // logger.info({ signal }, 'Apagando...');
   server.close(async () => {
     await db.$disconnect();
     process.exit(0);
