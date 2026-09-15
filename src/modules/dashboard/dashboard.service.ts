@@ -4,12 +4,11 @@ import { db } from '@infra/database';
 // por día efectiva); los KPIs en vivo van por conteos simples de Prisma.
 
 function hoyInicio(): Date {
-  // Bolivia UTC-4 — usar America/La_Paz para que "hoy" coincida con lo que ve el guardia en la web (no UTC del server Render)
-  const ahoraLaPaz = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/La_Paz' }));
-  ahoraLaPaz.setHours(0, 0, 0, 0);
-  // Convertir de vuelta a UTC para la query (Prisma espera Date en UTC)
-  const offsetMs = 4 * 60 * 60 * 1000;
-  return new Date(ahoraLaPaz.getTime() + offsetMs);
+  // Bolivia UTC-4 sin horario de verano. El inicio de "hoy" en La Paz es 00:00-04:00 → 04:00 UTC.
+  // Construir directamente desde el ISO YYYY-MM-DD de La Paz evita el doble-offset
+  // del hack previo `new Date(toLocaleString) + 4h` (que en servidores UTC corría 4h).
+  const isoLaPaz = new Date().toLocaleDateString('en-CA', { timeZone: 'America/La_Paz' }); // YYYY-MM-DD
+  return new Date(`${isoLaPaz}T00:00:00-04:00`);
 }
 
 function hoyLaPazISO(): string {
