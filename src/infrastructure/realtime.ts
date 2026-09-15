@@ -28,6 +28,8 @@ export const EVENTS = {
   patrullaAsignada: 'patrulla:asignada',
   patrullaCancelada: 'patrulla:cancelada',
   mandadoNuevo: 'mandado:nuevo',
+  turnoIniciado: 'turno:iniciado',
+  turnoFinalizado: 'turno:finalizado',
   telemetria: 'telemetria',
 } as const;
 
