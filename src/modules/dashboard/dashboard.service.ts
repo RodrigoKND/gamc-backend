@@ -4,9 +4,16 @@ import { db } from '@infra/database';
 // por día efectiva); los KPIs en vivo van por conteos simples de Prisma.
 
 function hoyInicio(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  // Bolivia UTC-4 — usar America/La_Paz para que "hoy" coincida con lo que ve el guardia en la web (no UTC del server Render)
+  const ahoraLaPaz = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/La_Paz' }));
+  ahoraLaPaz.setHours(0, 0, 0, 0);
+  // Convertir de vuelta a UTC para la query (Prisma espera Date en UTC)
+  const offsetMs = 4 * 60 * 60 * 1000;
+  return new Date(ahoraLaPaz.getTime() + offsetMs);
+}
+
+function hoyLaPazISO(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/La_Paz' }); // YYYY-MM-DD
 }
 
 export async function kpis() {
@@ -39,10 +46,11 @@ interface ZonaRow { zona: string | null; total: bigint }
 // tranquilo se veía igual que un día sin datos todavía).
 export async function hechosPorDia(dias = 7) {
   const n = Math.max(1, Math.min(30, dias));
+  // Usar fecha de Bolivia para que el gráfico de 7 días coincida con "Hechos Hoy" y con lo que ve el guardia
   const rows = await db.$queryRaw<DiaRow[]>`
     select to_char(d.dia, 'YYYY-MM-DD') as dia, coalesce(count(h.id), 0)::bigint as total
-    from generate_series(current_date - (${n}::int - 1), current_date, interval '1 day') as d(dia)
-    left join hecho h on h.ocurrido_en::date = d.dia
+    from generate_series((now() AT TIME ZONE 'America/La_Paz')::date - (${n}::int - 1), (now() AT TIME ZONE 'America/La_Paz')::date, interval '1 day') as d(dia)
+    left join hecho h on (h.ocurrido_en AT TIME ZONE 'America/La_Paz')::date = d.dia
     group by d.dia
     order by d.dia`;
   return rows.map((r) => ({ dia: r.dia, total: Number(r.total) }));
