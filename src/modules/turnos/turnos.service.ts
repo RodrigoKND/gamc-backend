@@ -127,6 +127,14 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
     estadoOperativo: estadoResultante,
     turnoId: turno.id,
   });
+  const gInicio = await db.guardia.findUnique({ where: { id: input.guardiaId }, select: { primerNombre: true, apellidoPaterno: true } });
+  const nombreInicio = gInicio ? `${gInicio.primerNombre} ${gInicio.apellidoPaterno}` : input.guardiaId;
+  publish(EVENTS.turnoIniciado, {
+    turnoId: turno.id,
+    guardiaId: input.guardiaId,
+    guardiaNombre: nombreInicio,
+    estado: 'en_servicio',
+  });
   // Si el guardia tenía una patrulla asignada, ahora pasa a en_curso — el
   // mapa de la web debe enterarse sin esperar polling.
   if (patrulla) {
@@ -196,6 +204,15 @@ export async function cerrarTurno(input: CerrarTurnoInput): Promise<TurnoRow> {
     guardiaId: input.guardiaId,
     estadoOperativo: estadoResultanteCierre,
     turnoId: input.turnoId,
+  });
+  const gCierre = await db.guardia.findUnique({ where: { id: input.guardiaId }, select: { primerNombre: true, apellidoPaterno: true } });
+  const nombreCierre = gCierre ? `${gCierre.primerNombre} ${gCierre.apellidoPaterno}` : input.guardiaId;
+  publish(EVENTS.turnoFinalizado, {
+    turnoId: input.turnoId,
+    guardiaId: input.guardiaId,
+    guardiaNombre: nombreCierre,
+    estado: 'finalizado',
+    distanciaMetros: Number(cerrado.distanciaMetros),
   });
   return toRow(cerrado);
 }
