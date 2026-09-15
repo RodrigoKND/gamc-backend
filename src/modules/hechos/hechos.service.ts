@@ -164,12 +164,30 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
     turnoId = abierto?.id ?? null;
   }
 
-  // Alta de un solo hecho (no un listado) — sí puede esperar la resolución
-  // real (a diferencia de toRow/peekAddress en los listados): así el
-  // detalle queda con dirección legible desde el primer momento en vez de
-  // depender de un refresh posterior. Solo se llama si el celular no mandó
-  // una dirección ya resuelta.
-  const direccion = input.direccion ?? (await reverseGeocode(input.lat, input.lng));
+  // Dirección: no bloquear el alta si Nominatim falla/lentea.
+  // Antes await reverseGeocode() podía dejar el POST colgado 5s+ (throttle
+  // 1.1s + timeout 5s) y la app móvil lo encolaba offline: la foto ya
+  // estaba en Supabase Storage pero el hecho nunca se insertaba. Ahora
+  // se guarda sin dirección y se resuelve en segundo plano.
+  let direccion: string | null = input.direccion ?? null;
+  if (!direccion) {
+    try {
+      // carrera con timeout corto; si no resuelve rápido, queda null
+      const winner = await Promise.race([
+        reverseGeocode(input.lat, input.lng),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      direccion = winner;
+    } catch {
+      direccion = null;
+    }
+    // si ganó el timeout y Nominatim sigue en vuelo, peekAddress lo
+    // cacheará igualmente para el próximo listado; no hace falta reintentar aquí
+    if (!direccion) {
+      // dispara en background sin bloquear (peekAddress ya lo hace, pero por si acaso)
+      void reverseGeocode(input.lat, input.lng).catch(() => {});
+    }
+  }
 
   const created = await db.hecho.create({
     data: {
