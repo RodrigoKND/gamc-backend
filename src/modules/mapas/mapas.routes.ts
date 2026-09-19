@@ -46,6 +46,7 @@ const crearRutaSchema = z.object({
   epiId: z.string().uuid().optional().nullable(),
   trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(2000),
   activo: z.boolean().optional(),
+  modalidad: z.enum(['coche', 'moto', 'a_pie', 'punto_fijo', 'oficina']).optional().nullable(),
 });
 
 export function buildMapasRouter(tokens: TokenService): Router {

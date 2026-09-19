@@ -242,6 +242,7 @@ model RutaPlantilla {
   epiId       String?  @map("epi_id") @db.Uuid
   trazado     Json?
   activo      Boolean  @default(true)
+  modalidad   String?  @map("modalidad")
   creadoPorId String?  @map("creado_por") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
