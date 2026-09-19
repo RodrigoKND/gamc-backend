@@ -121,12 +121,13 @@ export async function rutasPlantilla() {
   return rows.map((r) => ({
     id: r.id,
     nombre: r.nombre,
-    descripcion: r.descripcion,
+    descripcion: r.descripcion ?? undefined,
     epiId: r.epiId,
     epiCodigo: r.epi?.codigo ?? null,
     epiNombre: r.epi?.nombre ?? null,
     trazado: r.trazado,
-    activo: r.activo,
+    activa: r.activo,
+    modalidad: r.modalidad,
   }));
 }
 
@@ -142,6 +143,7 @@ export interface CrearRutaPlantillaInput {
    */
   trazado: [number, number][];
   activo?: boolean;
+  modalidad?: string | null;
   creadoPorId: string;
 }
 
@@ -164,6 +166,7 @@ export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
       epiId: input.epiId ?? null,
       trazado: input.trazado as Prisma.InputJsonValue,
       activo: input.activo ?? true,
+      modalidad: input.modalidad ?? null,
       creadoPorId: input.creadoPorId,
     },
     include: { epi: { select: { codigo: true, nombre: true } } },

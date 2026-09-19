@@ -205,7 +205,12 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
       ...(input.evidencias && input.evidencias.length > 0
         ? {
             evidencias: {
-              create: input.evidencias.map((e) => ({ url: e.url, tipo: e.tipo ?? 'foto' })),
+              // Deduplicar URLs de evidencia (evita fotos duplicadas en la DB
+              // cuando la app móvil envía la misma foto múltiples veces)
+              create: [...new Set(input.evidencias.map((e) => e.url))].map((url) => ({
+                url,
+                tipo: input.evidencias!.find((e) => e.url === url)?.tipo ?? 'foto',
+              })),
             },
           }
         : {}),
