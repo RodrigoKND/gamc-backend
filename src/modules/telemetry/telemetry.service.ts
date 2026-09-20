@@ -21,6 +21,7 @@ export interface TelemetryResult {
   turnoId: string | null;
   lat: number;
   lng: number;
+  bateriaPct: number | null;
   esSos: boolean;
   sosEstado: string | null;
   capturadoEn: Date;
@@ -75,6 +76,7 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
     turnoId: result.turnoId,
     lat: result.lat,
     lng: result.lng,
+    bateriaPct: result.bateriaPct,
     esSos: result.esSos,
     sosEstado: result.sosEstado,
     capturadoEn: result.capturadoEn,
@@ -87,6 +89,12 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
     lat: payload.lat,
     lng: payload.lng,
     capturadoEn: payload.capturadoEn,
+    // bateriaPct SÍ va siempre (a diferencia de esSos/estadoOperativo, ver
+    // abajo): antes faltaba en este evento por completo, así que el % de
+    // batería del pin en el mapa solo se actualizaba con el poll completo
+    // (cada 60s) o recargando la página — reportado explícitamente
+    // 2026-09-19 ("la batería ya funciona pero no me actualiza automático").
+    bateriaPct: payload.bateriaPct,
     // Solo se manda esSos/estadoOperativo cuando el ping SÍ es una alerta
     // real — un ping rutinario no debe pisar en el cliente (MapasView, ver
     // el handler optimista de guardiaUbicacion) el hasSos/operationalStatus
