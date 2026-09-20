@@ -26,14 +26,31 @@ export function buildTelemetryRouter(tokens: TokenService): Router {
   const router = Router();
   router.use(authenticate(tokens));
 
-  // Estado SOS actual del guardia autenticado (para que el botón SOS sepa si ya fue atendido)
+  // Estado SOS actual del guardia autenticado (para que el botón SOS sepa si ya fue atendido).
+  //
+  // BUG REAL 2026-09-19 ("me aparece que mi alerta sigue activa, pero ya
+  // está completada"): esto miraba la fila de telemetría MÁS RECIENTE sin
+  // importar si era o no un ping de SOS. El móvil manda un ping de
+  // ubicación rutinario cada ~45-90s durante todo el turno (enviarUbicacion,
+  // RF-APP-05) — ese ping NUNCA lleva esSos/sosEstado (van null). En cuanto
+  // llegaba uno de esos DESPUÉS de que el Operador resolviera el SOS
+  // (setEstadoOperativo marca `sosEstado:'atendido'` en la fila del SOS,
+  // no en las rutinarias), la fila "más reciente" volvía a ser una
+  // rutinaria con sosEstado=null — el chequeo `sosEstado === 'atendido'`
+  // del botón SOS (SosButton.tsx) nunca volvía a coincidir, y la app se
+  // quedaba mostrando "ACTIVO" para siempre (hasta el timeout duro de 90s,
+  // que además muestra el mensaje equivocado — "ayuda en camino" cuando en
+  // realidad ya estaba resuelto). Fix: mirar la ÚLTIMA fila que SÍ fue un
+  // ping de SOS (esSos:true) — el mismo criterio que ya usa
+  // setEstadoOperativo (guardias.service.ts) para decidir cuál fila
+  // marcar como atendida.
   router.get(
     '/estado',
     asyncHandler(async (req: AuthRequest, res) => {
       const guardiaId = req.principal!.id;
       const { db } = await import('@infra/database');
-      const last: any = await db.guardiaTelemetria.findFirst({
-        where: { guardiaId },
+      const lastSos: any = await db.guardiaTelemetria.findFirst({
+        where: { guardiaId, esSos: true },
         orderBy: { capturadoEn: 'desc' },
         select: { esSos: true, sosEstado: true, capturadoEn: true },
       });
@@ -41,7 +58,14 @@ export function buildTelemetryRouter(tokens: TokenService): Router {
         where: { id: guardiaId },
         select: { estadoOperativo: true },
       });
-      res.json({ data: { esSos: last?.esSos ?? false, sosEstado: last?.sosEstado ?? null, estadoOperativo: guardia?.estadoOperativo ?? null, capturadoEn: last?.capturadoEn ?? null } });
+      res.json({
+        data: {
+          esSos: lastSos?.esSos ?? false,
+          sosEstado: lastSos?.sosEstado ?? null,
+          estadoOperativo: guardia?.estadoOperativo ?? null,
+          capturadoEn: lastSos?.capturadoEn ?? null,
+        },
+      });
     }),
   );
 
