@@ -30,6 +30,7 @@ export interface HechoFiltros {
   tipo?: string;
   estado?: string;
   epiId?: string;
+  nivelRiesgo?: string;
   desde?: string;
   hasta?: string;
   q?: string;
@@ -66,11 +67,12 @@ function toRow(row: Prisma.HechoGetPayload<{
   };
 }
 
-export async function listHechos(filtros: HechoFiltros & { limit?: number; offset?: number } = {}): Promise<HechoRow[]> {
+function buildHechoWhere(filtros: HechoFiltros): Prisma.HechoWhereInput {
   const where: Prisma.HechoWhereInput = {};
   if (filtros.tipo) where.tipoHecho = { codigo: filtros.tipo };
   if (filtros.estado) where.estado = filtros.estado as hecho_estado;
   if (filtros.epiId) where.epiId = filtros.epiId;
+  if (filtros.nivelRiesgo) where.nivelRiesgo = filtros.nivelRiesgo as nivel_riesgo;
   if (filtros.desde || filtros.hasta) {
     where.ocurridoEn = {};
     if (filtros.desde) where.ocurridoEn.gte = new Date(filtros.desde);
@@ -89,8 +91,21 @@ export async function listHechos(filtros: HechoFiltros & { limit?: number; offse
         ]}},
         { tipoHecho: { label: { contains: q, mode: 'insensitive' } } },
       ];
+      // El buscador de la web también se usa para "saltar" a un hecho
+      // puntual desde una notificación (/hechos?q=<uuid>) — sin esto, un
+      // id exacto no matchea ningún texto libre de arriba y la búsqueda
+      // por servidor "pierde" ese caso que el filtro client-side viejo sí
+      // cubría (comparaba contra el id directamente).
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
+        where.OR.push({ id: q });
+      }
     }
   }
+  return where;
+}
+
+export async function listHechos(filtros: HechoFiltros & { limit?: number; offset?: number } = {}): Promise<HechoRow[]> {
+  const where = buildHechoWhere(filtros);
   const take = Math.min(Math.max(filtros.limit ?? 200, 1), 500);
   const skip = Math.max(filtros.offset ?? 0, 0);
   const rows = await db.hecho.findMany({
@@ -101,6 +116,13 @@ export async function listHechos(filtros: HechoFiltros & { limit?: number; offse
     include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
   });
   return rows.map((row) => toRow(row as any));
+}
+
+// Total real (sin `take`) para pintar controles de página — listHechos
+// solo/siempre devolvía como máximo `limit` filas (200 por defecto) sin
+// forma de saber cuántas había en total detrás de ese corte.
+export async function countHechos(filtros: HechoFiltros = {}): Promise<number> {
+  return db.hecho.count({ where: buildHechoWhere(filtros) });
 }
 
 export async function listTiposHecho() {

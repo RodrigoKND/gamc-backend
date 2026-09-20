@@ -11,6 +11,7 @@ import {
 } from '@modules/auth/http/middlewares';
 import {
   changeHechoEstado,
+  countHechos,
   crearHechoMovil,
   listHechos,
   listHechosDeGuardia,
@@ -71,11 +72,26 @@ export function buildHechosRouter(tokens: TokenService): Router {
         const tipo = typeof req.query.tipo === 'string' ? req.query.tipo : undefined;
         const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
         const epiId = typeof req.query.epiId === 'string' ? req.query.epiId : typeof req.query.epi === 'string' ? req.query.epi : undefined;
+        const nivelRiesgo = typeof req.query.nivelRiesgo === 'string' ? req.query.nivelRiesgo : undefined;
         const desde = typeof req.query.desde === 'string' ? req.query.desde : undefined;
         const hasta = typeof req.query.hasta === 'string' ? req.query.hasta : undefined;
+        const filtros = { q, tipo, estado, epiId, nivelRiesgo, desde, hasta };
+        // page/pageSize (opcional, aditivo a limit/offset de siempre): cuando
+        // viene, también se pide el total real para pintar controles de
+        // página — antes no había forma de saber cuántos hechos había en
+        // total más allá del corte de `limit` (200 por defecto).
+        const page = req.query.page ? Number(req.query.page) : undefined;
+        if (page) {
+          const pageSize = Math.min(Math.max(req.query.pageSize ? Number(req.query.pageSize) : 20, 1), 100);
+          const offset = Math.max(page - 1, 0) * pageSize;
+          Promise.all([listHechos({ ...filtros, limit: pageSize, offset }), countHechos(filtros)])
+            .then(([data, total]) => res.json({ data, meta: { total, page, pageSize } }))
+            .catch(next);
+          return;
+        }
         const limit = req.query.limit ? Number(req.query.limit) : undefined;
         const offset = req.query.offset ? Number(req.query.offset) : undefined;
-        listHechos({ q, tipo, estado, epiId, desde, hasta, limit, offset })
+        listHechos({ ...filtros, limit, offset })
           .then((data) => res.json({ data }))
           .catch(next);
       });

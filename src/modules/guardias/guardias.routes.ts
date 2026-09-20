@@ -53,7 +53,11 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
       const epi = typeof req.query.epi === 'string' ? req.query.epi : typeof req.query.epiCodigo === 'string' ? req.query.epiCodigo : undefined;
       const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
       const estadoOperativo = typeof req.query.estadoOperativo === 'string' ? req.query.estadoOperativo : undefined;
-      res.json({ data: await listGuardias(true, { q, epiCodigo: epi, estado, estadoOperativo }) });
+      const excluirInactivos = req.query.excluirInactivos === '1' || req.query.excluirInactivos === 'true';
+      const page = req.query.page ? Number(req.query.page) : undefined;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
+      const { rows, total } = await listGuardias(true, { q, epiCodigo: epi, estado, estadoOperativo, excluirInactivos, page, pageSize });
+      res.json({ data: rows, meta: { total, page, pageSize } });
     }),
   );
 

@@ -93,8 +93,8 @@ async function turnosActivos(): Promise<Map<string, Date>> {
 
 export async function listGuardias(
   includeUbicacion = true,
-  filtros: { q?: string; epiCodigo?: string; estado?: string; estadoOperativo?: string } = {},
-): Promise<GuardiaRow[]> {
+  filtros: { q?: string; epiCodigo?: string; estado?: string; estadoOperativo?: string; excluirInactivos?: boolean; page?: number; pageSize?: number } = {},
+): Promise<{ rows: GuardiaRow[]; total: number }> {
   const where: any = {};
   if (filtros.epiCodigo) {
     const epi = await db.epi.findUnique({ where: { codigo: filtros.epiCodigo }, select: { id: true } });
@@ -102,6 +102,12 @@ export async function listGuardias(
     else where.epiId = '__none__';
   }
   if (filtros.estado) where.estado = filtros.estado;
+  // La tabla principal de /guardias esconde a los dados de baja (cuenta
+  // 'inactivo') — antes esa exclusión vivía SOLO client-side
+  // (isDadoDeBaja en features/guardias/types.ts) filtrando sobre la
+  // lista completa; ahora que esa vista pide página por página al
+  // backend, la regla tiene que aplicarse acá para no mostrarlos.
+  else if (filtros.excluirInactivos) where.estado = { not: 'inactivo' };
   if (filtros.estadoOperativo) where.estadoOperativo = filtros.estadoOperativo;
   if (filtros.q) {
     const q = filtros.q.trim();
@@ -116,16 +122,34 @@ export async function listGuardias(
       ];
     }
   }
-  const guardias = await db.guardia.findMany({
-    where: Object.keys(where).length ? where : undefined,
-    orderBy: { createdAt: 'desc' },
-    include: { epi: { select: { codigo: true, nombre: true } } },
-  });
+  const whereClause = Object.keys(where).length ? where : undefined;
+
+  // Paginación (page/pageSize) opcional — sin ellos se comporta como
+  // antes (trae todo), porque getGuardMarkers/GlobalSosBanner/el filtro
+  // por estado del Dashboard necesitan la lista completa para poder
+  // filtrar en memoria. Solo la tabla de /guardias pide página por página.
+  const pageSize = filtros.pageSize ? Math.min(Math.max(filtros.pageSize, 1), 500) : undefined;
+  const page = pageSize ? Math.max(filtros.page ?? 1, 1) : undefined;
+
+  // orderBy por estadoOperativo aprovecha el orden real del enum en
+  // Postgres (fuera_de_servicio < en_servicio < emergencia, ver
+  // schema.prisma) — 'desc' pone emergencia primero, luego en_servicio,
+  // luego fuera_de_servicio. Pedido explícito: "los de servicio van
+  // primero" — antes solo ordenaba por fecha de creación.
+  const [guardias, total] = await Promise.all([
+    db.guardia.findMany({
+      where: whereClause,
+      orderBy: [{ estadoOperativo: 'desc' }, { createdAt: 'desc' }],
+      include: { epi: { select: { codigo: true, nombre: true } } },
+      ...(pageSize ? { take: pageSize, skip: (page! - 1) * pageSize } : {}),
+    }),
+    db.guardia.count({ where: whereClause }),
+  ]);
 
   const ids = guardias.map((g) => g.id);
   const [posiciones, activos] = await Promise.all([ultimaPosicion(ids), turnosActivos()]);
 
-  return guardias.map((g) => ({
+  const rows = guardias.map((g) => ({
     id: g.id,
     primerNombre: g.primerNombre,
     segundoNombre: g.segundoNombre,
@@ -149,6 +173,7 @@ export async function listGuardias(
     turnoActivo: activos.has(g.id),
     turnoInicio: activos.get(g.id) ?? null,
   }));
+  return { rows, total };
 }
 
 export async function getGuardia(id: string): Promise<GuardiaRow & { hechosCount: number; turnosCount: number } | null> {
