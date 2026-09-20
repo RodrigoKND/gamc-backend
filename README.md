@@ -272,6 +272,80 @@ module/
 
 ---
 
+## Requisitos del sistema para respuestas rápidas (tiempo real y geolocalización)
+
+El mapa en vivo, las alertas SOS y el estado de cada guardia dependen de que la
+telemetría GPS (`POST /telemetry`, cada ~45-90s por guardia en servicio, RF-APP-05)
+llegue y se empuje por Socket.io sin demoras perceptibles. Esto no es opcional para
+producción — es lo que evita que "todo se sienta lento".
+
+### Servidor de aplicación (Node.js + Socket.io)
+
+- **CPU/RAM**: mínimo 1 vCPU / 512 MB para un piloto (decenas de guardias); **2 vCPU
+  / 1 GB dedicado** recomendado en producción real (cientos de guardias + varios
+  dashboards abiertos a la vez). Node.js es de un solo hilo por proceso — un pico de
+  CPU (ej. muchas evidencias subiendo a la vez) frena temporalmente el envío de
+  telemetría a **todos** los guardias y Operadores conectados, no solo a uno.
+- **Región**: el servidor debe estar en la región más cercana a Bolivia que ofrezca
+  el proveedor (ej. São Paulo / `sa-east-1` en AWS, o el datacenter sudamericano más
+  cercano de Render/Railway/Fly.io). Cada 100ms de latencia de red se siente doble:
+  una vez en el ping GPS subiendo, otra vez en el push por socket bajando al
+  navegador del Operador.
+- **Proceso persistente, no serverless**: Socket.io necesita una conexión TCP larga
+  — no funciona en una plataforma de "cold start" (ej. funciones serverless de
+  Vercel). Tiene que ser un proceso siempre activo (Render, Railway, Fly.io, una VM).
+- **Una sola instancia por defecto**: `publish()` (`src/infrastructure/realtime.ts`)
+  emite solo a los sockets conectados A ESE proceso. Si se escala a 2+ instancias sin
+  un adapter compartido, un guardia conectado a la instancia A y un Operador
+  conectado a la instancia B **nunca** se van a enterar el uno del otro en vivo
+  (el polling de respaldo cada 30-60s del frontend sí seguiría funcionando, pero ya
+  no sería "en vivo"). Escalar horizontalmente requiere agregar
+  `@socket.io/redis-adapter` (o equivalente) **antes** de correr más de un proceso.
+
+### Base de datos (PostgreSQL / Supabase)
+
+- **Connection pooler**: usar el "Session pooler" de Supabase (puerto 5432, ya
+  documentado arriba) — el pooler de transacción no sostiene bien las conexiones
+  largas que Prisma necesita bajo carga sostenida de telemetría.
+- **Índices** (pendiente, recomendado antes de escalar): el esquema actual
+  (`prisma/schema.prisma`) no tiene ningún `@@index` explícito más allá de las
+  claves primarias. Las consultas más frecuentes del sistema (última posición de
+  cada guardia, estado de un SOS, KPIs del dashboard) filtran/ordenan por
+  `guardia_id` + `capturado_en` sobre `guardia_telemetria` — una tabla que crece
+  **sin límite** (una fila cada ~45-90s por guardia activo, durante todo el turno,
+  para siempre). Sin índice, esas consultas se vuelven progresivamente más lentas a
+  medida que la tabla crece:
+  ```prisma
+  model GuardiaTelemetria {
+    // ...campos existentes...
+    @@index([guardiaId, capturadoEn(sort: Desc)])
+  }
+  ```
+- **Retención**: sin una política de limpieza, `guardia_telemetria` crece
+  indefinidamente (un guardia en servicio 8h genera ~350-650 filas/día). Evaluar
+  archivar o borrar filas rutinarias (no-SOS) más viejas que, por ejemplo, 90 días.
+- **Cercanía geográfica**: la región del proyecto Supabase debe estar cerca de la
+  región del servidor de aplicación (idealmente la misma) — la latencia entre el API
+  y la base de datos se multiplica por cada telemetría entrante.
+
+### Presupuesto de capacidad (con el intervalo actual de ping, ~45-90s)
+
+| Guardias en servicio simultáneo | Pings/segundo hacia `/telemetry` |
+| --- | --- |
+| 50 | ~0.6–1.1/s (trivial para un proceso) |
+| 500 | ~6–11/s (aún maneja un proceso bien dimensionado, pero es el punto donde conviene tener ya el índice de arriba y evaluar el adapter de Redis) |
+
+### Monitoreo mínimo recomendado
+
+- Verificación de salud (`GET /health`, ya existe) desde un servicio externo
+  (UptimeRobot, Better Uptime, etc.) cada 1-5 min — sin esto, una caída del proceso
+  solo se nota cuando alguien reporta que "el mapa no actualiza".
+- Alertar si el tiempo de respuesta de `/health` o de cualquier endpoint supera
+  ~1-2s sostenido — es la señal más temprana de que el servidor o la base de datos
+  están por debajo de lo necesario.
+
+---
+
 ## Notas de seguridad
 
 - `helmet`, `compression`, `cors` con **orígenes explícitos**.
