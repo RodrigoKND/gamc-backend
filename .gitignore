@@ -60,3 +60,7 @@ Thumbs.db
 # Secretos locales de cualquier herramienta
 *.secret
 *.token
+
+# Guía de despliegue privada (solo para mí, nunca al repo)
+README_deploy.md
+deploy_cpanel.sql
