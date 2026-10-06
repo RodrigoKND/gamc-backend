@@ -42,6 +42,13 @@ export interface AuthRepository {
     passwordHash: string,
     tx?: Tx,
   ): Promise<GuardiaCredentialRow | null>;
+  /**
+   * Activación implícita (BD_UNIFICADA §5, modo de prueba sin canal de envío
+   * de código todavía): marca la cuenta activa cuando el guardia inicia
+   * sesión por primera vez con la contraseña temporal que ya conoce, sin
+   * pasar por `activacionToken`. Ver nota en `loginGuardia`.
+   */
+  activateGuardiaFirstLogin(guardiaId: string, tx?: Tx): Promise<void>;
 
   findRoleById(roleId: string, tx?: Tx): Promise<{ codigo: string } | null>;
   updateUserLastLogin(userId: string, tx?: Tx): Promise<void>;
