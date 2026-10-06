@@ -88,6 +88,7 @@ const USUARIOS = [
     apellidoMaterno: 'Vargas',
     ci: '4987654',
     telefono: '70123456',
+    epi: null,
   },
   {
     email: 'carlos.mendoza@cochabamba.bo',
@@ -100,6 +101,7 @@ const USUARIOS = [
     apellidoMaterno: 'Toro',
     ci: '6123456',
     telefono: '71234567',
+    epi: 'central',
   },
   {
     email: 'jorge.quispe@cochabamba.bo',
@@ -112,6 +114,7 @@ const USUARIOS = [
     apellidoMaterno: 'Cruz',
     ci: '5345678',
     telefono: '72345678',
+    epi: 'central',
   },
 ] as const;
 
@@ -166,11 +169,13 @@ async function main() {
     for (let i = 0; i < USUARIOS.length; i++) {
       const u = USUARIOS[i]!;
       const role = await tx.role.findUniqueOrThrow({ where: { codigo: u.rol } });
+      const epi = u.epi ? await tx.epi.findUniqueOrThrow({ where: { codigo: u.epi } }) : null;
       const user = await tx.user.upsert({
         where: { email: u.email },
-        update: { roleId: role.id, passwordHash: pws[i]! },
+        update: { roleId: role.id, epiId: epi?.id ?? null, passwordHash: pws[i]! },
         create: {
           roleId: role.id,
+          epiId: epi?.id ?? null,
           primerNombre: u.primerNombre,
           segundoNombre: u.segundoNombre,
           apellidoPaterno: u.apellidoPaterno,
