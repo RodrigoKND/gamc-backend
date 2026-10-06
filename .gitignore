@@ -20,6 +20,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# Archivos subidos por la app (selfies, evidencia foto/video) — datos de
+# usuario reales, nunca al repo.
+uploads/
+
 # Prisma — el schema SI se versiona (prisma/schema.prisma), la BD no.
 prisma/*.db
 prisma/*.db-journal

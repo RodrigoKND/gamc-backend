@@ -52,6 +52,10 @@ export class InMemoryAuthRepository implements AuthRepository {
     return null;
   }
 
+  async activateGuardiaFirstLogin(): Promise<void> {
+    void 0;
+  }
+
   async findRoleById(roleId: string): Promise<{ codigo: string } | null> {
     for (const u of this.users.values()) {
       if (u.roleId === roleId) return { codigo: u.roleCodigo };
