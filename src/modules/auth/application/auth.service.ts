@@ -338,7 +338,7 @@ export class AuthService {
         expiraEn: expiresAt,
       });
       await this.deps.audit({ actorUserId: user.id, accion: 'solicitar_reset', recurso: 'auth', recursoId: user.id });
-      return { accepted: true, expiresAt, code: env.DEV_RETURN_RESET_CODE ? code : undefined };
+      return { accepted: true, expiresAt, code: env.NODE_ENV !== 'production' && env.DEV_RETURN_RESET_CODE ? code : undefined };
     }
     return { accepted: true, expiresAt: new Date(Date.now() + env.RESET_CODE_MINUTES * 60_000) };
   }

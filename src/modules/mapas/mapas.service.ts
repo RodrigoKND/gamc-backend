@@ -5,6 +5,7 @@ import { nombreCompleto } from '@shared/names';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 import { peekAddress, reverseGeocode } from './geocoding.service.js';
+import { epiDePunto, exigirDentroDeEpi, exigirMismaEpi, type Jurisdiccion } from './jurisdiccion.js';
 
 export interface UbicacionGuardiaRow {
   guardiaId: string;
@@ -145,6 +146,8 @@ export interface CrearRutaPlantillaInput {
   activo?: boolean;
   modalidad?: string | null;
   creadoPorId: string;
+  /** null/undefined = sin restricción (super_admin). */
+  jurisdiccion?: Jurisdiccion | null;
 }
 
 // RF-G3-09 (rediseño de rutas 2026-09-14, Web): antes no existía forma de
@@ -159,11 +162,19 @@ export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
   if (input.trazado.length < 2 || input.trazado.length > 2000) {
     throw Errors.validation('El trazado de la ruta necesita entre 2 y 2000 puntos.');
   }
+  // Jurisdicción: un Operador/Admin solo crea rutas de su EPI y dentro de
+  // su polígono — la EPI de la ruta la fija el backend, no el cliente.
+  const j = input.jurisdiccion ?? null;
+  if (j && input.epiId) exigirMismaEpi(j, input.epiId, 'La EPI indicada');
+  exigirDentroDeEpi(j, input.trazado);
+  // super_admin sin EPI explícita: la ruta queda en la EPI donde empieza el
+  // trazado, para que los Operadores de esa EPI puedan usarla/cancelarla.
+  const epiId = j?.epiId ?? input.epiId ?? (await epiDePunto(input.trazado[0]!));
   const ruta = await db.rutaPlantilla.create({
     data: {
       nombre: input.nombre,
       descripcion: input.descripcion ?? null,
-      epiId: input.epiId ?? null,
+      epiId,
       trazado: input.trazado as Prisma.InputJsonValue,
       activo: input.activo ?? true,
       modalidad: input.modalidad ?? null,
@@ -199,13 +210,18 @@ export async function crearRutaPlantilla(input: CrearRutaPlantillaInput) {
 // para no perder el historial/auditoría — igual que `cerrarTurno` reusa
 // `completadaEn` como "cuándo dejó de estar vigente" para cualquier estado
 // terminal, no solo 'completada'.
-export async function cancelarRuta(rutaPlantillaId: string, actorUserId: string) {
+export async function cancelarRuta(rutaPlantillaId: string, actorUserId: string, j: Jurisdiccion | null = null) {
   const vigentes = await db.patrulla.findMany({
     where: { rutaPlantillaId, estado: { in: ['asignada', 'en_curso'] } },
-    select: { id: true, guardiaId: true },
+    select: { id: true, guardiaId: true, epiId: true },
   });
   if (vigentes.length === 0) {
     throw Errors.notFound('No hay guardias con esta ruta vigente para cancelar.');
+  }
+  if (j) {
+    const ruta = await db.rutaPlantilla.findUnique({ where: { id: rutaPlantillaId }, select: { epiId: true } });
+    exigirMismaEpi(j, ruta?.epiId ?? vigentes[0]!.epiId, 'Esta ruta');
+    for (const p of vigentes) exigirMismaEpi(j, p.epiId, 'Un guardia de esta ruta');
   }
 
   await db.patrulla.updateMany({
@@ -232,14 +248,15 @@ export async function cancelarRuta(rutaPlantillaId: string, actorUserId: string)
 // guardia (o varios, de a uno) de una ruta compartida sin tocar a los
 // demás — cancela solo su propia fila `patrulla`, no las del resto del
 // grupo. Mismo criterio soft-cancel que cancelarRuta.
-export async function cancelarPatrulla(patrullaId: string, actorUserId: string) {
+export async function cancelarPatrulla(patrullaId: string, actorUserId: string, j: Jurisdiccion | null = null) {
   const patrulla = await db.patrulla.findUnique({
     where: { id: patrullaId },
-    select: { id: true, guardiaId: true, rutaPlantillaId: true, estado: true },
+    select: { id: true, guardiaId: true, rutaPlantillaId: true, estado: true, epiId: true },
   });
   if (!patrulla || !['asignada', 'en_curso'].includes(patrulla.estado)) {
     throw Errors.notFound('No hay una asignación vigente con ese id para cancelar.');
   }
+  exigirMismaEpi(j, patrulla.epiId, 'Esta asignación');
 
   await db.patrulla.update({
     where: { id: patrullaId },
@@ -293,33 +310,81 @@ export interface AsignarPatrullaInput {
   poligonoGeojson?: Prisma.InputJsonValue | null;
   asignadoPorId: string;
   fecha?: Date;
+  /** null/undefined = sin restricción (super_admin). */
+  jurisdiccion?: Jurisdiccion | null;
 }
 
 export async function asignarPatrulla(input: AsignarPatrullaInput) {
   const guardia = await db.guardia.findUnique({ where: { id: input.guardiaId } });
   if (!guardia) throw Errors.validation('La guardia indicada no existe.');
-  const patrulla = await db.patrulla.create({
-    data: {
-      guardiaId: input.guardiaId,
-      rutaPlantillaId: input.rutaPlantillaId ?? null,
-      epiId: input.epiId ?? guardia.epiId ?? null,
-      nombre: input.nombre ?? null,
-      descripcion: input.descripcion ?? null,
-      poligonoGeojson: input.poligonoGeojson ?? undefined,
-      asignadoPorId: input.asignadoPorId,
-      estado: 'asignada',
-      fecha: input.fecha ?? new Date(),
-      iniciadaEn: new Date(),
-      horaInicioPrevista: input.fecha ?? null,
-    },
+
+  // Jurisdicción: guardia, ruta compartida y trazado deben ser de la EPI
+  // del Operador/Admin (super_admin llega con jurisdiccion = null).
+  const j = input.jurisdiccion ?? null;
+  if (j) {
+    exigirMismaEpi(j, guardia.epiId, 'El guardia');
+    if (input.epiId) exigirMismaEpi(j, input.epiId, 'La EPI indicada');
+    if (input.rutaPlantillaId) {
+      const ruta = await db.rutaPlantilla.findUnique({
+        where: { id: input.rutaPlantillaId },
+        select: { epiId: true, trazado: true },
+      });
+      if (!ruta) throw Errors.validation('La ruta indicada no existe.');
+      exigirMismaEpi(j, ruta.epiId, 'La ruta');
+      exigirDentroDeEpi(j, ruta.trazado);
+    }
+    exigirDentroDeEpi(j, input.poligonoGeojson);
+  }
+
+  // Blindaje 2026-09-15 ("un guardia puede aparecer en varias rutas, lo cual
+  // es imposible"): esto antes solo CREABA la fila nueva — si el guardia ya
+  // tenía otra `patrulla` vigente (asignada/en_curso), las dos quedaban
+  // activas a la vez y groupPatrullasByRuta (Web) lo mostraba en ambos
+  // grupos, fiel a lo que hay en la base. Un guardia solo puede tener UNA
+  // ruta activa — mismo comportamiento que ya tiene el móvil (asignar una
+  // nueva reemplaza a la anterior, nunca conviven). Se retira la(s) vieja(s)
+  // y se crea la nueva en la MISMA transacción para que nunca haya un
+  // instante con cero o dos filas activas.
+  const { patrulla, retiradas } = await db.$transaction(async (tx) => {
+    const vigentes = await tx.patrulla.findMany({
+      where: { guardiaId: input.guardiaId, estado: { in: ['asignada', 'en_curso'] } },
+      select: { id: true },
+    });
+    if (vigentes.length > 0) {
+      await tx.patrulla.updateMany({
+        where: { id: { in: vigentes.map((p) => p.id) } },
+        data: { estado: 'cancelada', completadaEn: new Date() },
+      });
+    }
+    const creada = await tx.patrulla.create({
+      data: {
+        guardiaId: input.guardiaId,
+        rutaPlantillaId: input.rutaPlantillaId ?? null,
+        epiId: input.epiId ?? guardia.epiId ?? null,
+        nombre: input.nombre ?? null,
+        descripcion: input.descripcion ?? null,
+        poligonoGeojson: input.poligonoGeojson ?? undefined,
+        asignadoPorId: input.asignadoPorId,
+        estado: 'asignada',
+        fecha: input.fecha ?? new Date(),
+        iniciadaEn: new Date(),
+        horaInicioPrevista: input.fecha ?? null,
+      },
+    });
+    return { patrulla: creada, retiradas: vigentes.map((p) => p.id) };
   });
+
+  const { jurisdiccion: _j, ...detalleInput } = input;
   await logAudit({
     actorUserId: input.asignadoPorId,
     accion: 'asignar_patrulla',
     recurso: 'patrullaje',
     recursoId: patrulla.id,
-    detalle: input,
+    detalle: { ...detalleInput, rutasRetiradas: retiradas },
   });
+  for (const id of retiradas) {
+    publish(EVENTS.patrullaCancelada, { id, guardiaId: patrulla.guardiaId });
+  }
   publish(EVENTS.patrullaAsignada, {
     id: patrulla.id,
     guardiaId: patrulla.guardiaId,

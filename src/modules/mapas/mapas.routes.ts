@@ -1,7 +1,7 @@
 ﻿import { Router } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
-import { asyncHandler, validate } from '@shared/index';
+import { AppError, asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/middlewares';
 import { recorridoQuery } from '@modules/turnos/turnos.service';
@@ -18,6 +18,7 @@ import {
   ubicacionesActuales,
   zonasCriticas,
 } from './mapas.service.js';
+import { episConPoligono, jurisdiccionDe } from './jurisdiccion.js';
 
 const asignarSchema = z.object({
   guardiaId: z.string().uuid(),
@@ -69,6 +70,36 @@ export function buildMapasRouter(tokens: TokenService): Router {
     }),
   );
 
+  // Jurisdicción (2026-10-05): polígono + color de cada EPI para la capa
+  // "cristal" del mapa, y la EPI del usuario (null = sin restricción,
+  // super_admin). La Web la usa para bloquear dibujar fuera de su EPI; la
+  // validación real está en mapas.service.ts (crear/asignar/cancelar).
+  router.get(
+    '/jurisdiccion',
+    authorize('mapas', 'ver'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const principal = req.principal!;
+      const epis = await episConPoligono();
+      let miEpiCodigo: string | null = null;
+      let restringido = principal.role !== 'super_admin';
+      if (restringido) {
+        try {
+          miEpiCodigo = (await jurisdiccionDe(principal))?.epiCodigo ?? null;
+        } catch (error) {
+          // Una cuenta sin EPI es un estado funcional que la Web debe poder
+          // mostrar. Los errores reales de base/conexión no se ocultan como
+          // si fueran ese caso: llegan al errorHandler y responden 500.
+          if (error instanceof AppError && error.code === 'FORBIDDEN') {
+            miEpiCodigo = null;
+          } else {
+            throw error;
+          }
+        }
+      }
+      res.json({ data: { epis, miEpiCodigo, restringido } });
+    }),
+  );
+
   router.get(
     '/rutas',
     authorize('mapas', 'ver'),
@@ -87,7 +118,8 @@ export function buildMapasRouter(tokens: TokenService): Router {
     authorize('patrullaje', 'crear'),
     asyncHandler(async (req: AuthRequest, res) => {
       const input = validate(crearRutaSchema, req.body);
-      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id });
+      const jurisdiccion = await jurisdiccionDe(req.principal!);
+      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id, jurisdiccion });
       res.status(201).json({ data: ruta });
     }),
   );
@@ -103,7 +135,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
     '/rutas/:id/cancelar',
     authorize('patrullaje', 'editar'),
     asyncHandler(async (req: AuthRequest, res) => {
-      const resultado = await cancelarRuta(req.params.id!, req.principal!.id);
+      const resultado = await cancelarRuta(req.params.id!, req.principal!.id, await jurisdiccionDe(req.principal!));
       res.json({ data: resultado });
     }),
   );
@@ -116,7 +148,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
     '/patrullas/:id/cancelar',
     authorize('patrullaje', 'editar'),
     asyncHandler(async (req: AuthRequest, res) => {
-      const resultado = await cancelarPatrulla(req.params.id!, req.principal!.id);
+      const resultado = await cancelarPatrulla(req.params.id!, req.principal!.id, await jurisdiccionDe(req.principal!));
       res.json({ data: resultado });
     }),
   );
@@ -184,6 +216,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
       const input = validate(asignarSchema, req.body);
       const patrulla = await asignarPatrulla({
         ...input,
+        jurisdiccion: await jurisdiccionDe(req.principal!),
         poligonoGeojson: input.poligonoGeojson as Prisma.InputJsonValue | null | undefined,
         asignadoPorId: req.principal!.id,
       });
