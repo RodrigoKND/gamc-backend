@@ -6,6 +6,12 @@ import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 import { peekAddress, reverseGeocode } from '@modules/mapas/geocoding.service.js';
 
+export interface HechoEvidenciaRow {
+  id: string;
+  url: string;
+  tipo: string;
+}
+
 export interface HechoRow {
   id: string;
   tipoHecho: string;
@@ -23,8 +29,15 @@ export interface HechoRow {
   epiNombre: string | null;
   guardiaNombre: string;
   guardiaId: string;
-  evidencias?: { id: string; url: string; tipo: string }[];
+  evidencias: HechoEvidenciaRow[];
 }
+
+const HECHO_INCLUDE = {
+  tipoHecho: true,
+  epi: { select: { codigo: true, nombre: true } },
+  guardia: true,
+  evidencias: true,
+} satisfies Prisma.HechoInclude;
 
 export interface HechoFiltros {
   tipo?: string;
@@ -43,9 +56,7 @@ export interface HechoFiltros {
 // en caché o dispara la resolución en segundo plano para el próximo
 // refresh. Pedido explícito 2026-09-14: la Web NUNCA debe mostrar lat/lng
 // crudos, siempre lenguaje natural.
-function toRow(row: Prisma.HechoGetPayload<{
-  include: { tipoHecho: true; epi: { select: { codigo: true; nombre: true } }; guardia: true; evidencias: true };
-}>, includeGuardiaNombre = true): HechoRow {
+function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, includeGuardiaNombre = true): HechoRow {
   return {
     id: row.id,
     tipoHecho: row.tipoHecho.codigo,
@@ -59,11 +70,11 @@ function toRow(row: Prisma.HechoGetPayload<{
     reportadoEn: row.reportadoEn,
     estado: row.estado,
     epiId: row.epiId,
+    evidencias: row.evidencias.map((e) => ({ id: e.id, url: e.url, tipo: e.tipo })),
     epiCodigo: row.epi?.codigo ?? null,
     epiNombre: row.epi?.nombre ?? null,
     guardiaNombre: includeGuardiaNombre ? nombreCompleto(row.guardia) : '',
     guardiaId: row.guardiaId,
-    evidencias: (row as any).evidencias?.map((e: any) => ({ id: e.id, url: e.url, tipo: e.tipo })) ?? [],
   };
 }
 
@@ -113,7 +124,7 @@ export async function listHechos(filtros: HechoFiltros & { limit?: number; offse
     orderBy: { ocurridoEn: 'desc' },
     take,
     skip,
-    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
+    include: HECHO_INCLUDE,
   });
   return rows.map((row) => toRow(row as any));
 }
@@ -150,7 +161,6 @@ export interface CrearHechoMovilInput {
 
 export interface HechoMovilRow extends HechoRow {
   turnoId: string | null;
-  evidencias: { id: string; url: string; tipo: string }[];
 }
 
 // Alta de hecho desde el MÓVIL (BD_UNIFICADA §5.3). El `guardiaId` sale del
@@ -237,12 +247,7 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
           }
         : {}),
     },
-    include: {
-      tipoHecho: true,
-      epi: { select: { codigo: true, nombre: true } },
-      guardia: true,
-      evidencias: true,
-    },
+    include: HECHO_INCLUDE,
   });
 
   await logAudit({
@@ -254,11 +259,7 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
   });
   const base = toRow(created);
   publish(EVENTS.hechoActualizado, base);
-  return {
-    ...base,
-    turnoId: created.turnoId,
-    evidencias: created.evidencias.map((e) => ({ id: e.id, url: e.url, tipo: e.tipo })),
-  };
+  return { ...base, turnoId: created.turnoId };
 }
 
 export async function listHechosDeGuardia(guardiaId: string): Promise<HechoRow[]> {
@@ -266,7 +267,7 @@ export async function listHechosDeGuardia(guardiaId: string): Promise<HechoRow[]
     where: { guardiaId },
     orderBy: { ocurridoEn: 'desc' },
     take: 200,
-    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
+    include: HECHO_INCLUDE,
   });
   return rows.map((row) => toRow(row as any));
 }
@@ -282,7 +283,7 @@ export async function changeHechoEstado(id: string, estado: hecho_estado, actorI
   }
   const row = await db.hecho.findUnique({
     where: { id },
-    include: { tipoHecho: true, epi: { select: { codigo: true, nombre: true } }, guardia: true, evidencias: true },
+    include: HECHO_INCLUDE,
   });
   if (!row) throw Errors.notFound('Hecho no encontrado.');
   await logAudit({ actorUserId: actorId, accion: `hecho_${estado}`, recurso: 'hechos', recursoId: id });
