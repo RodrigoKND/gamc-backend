@@ -19,6 +19,9 @@ import { buildTelemetryRouter } from '@modules/telemetry/telemetry.routes';
 import { buildTurnosRouter } from '@modules/turnos/turnos.routes';
 import { buildMandadosRouter } from '@modules/mandados/mandados.routes';
 import { buildPatrullasRouter } from '@modules/patrullas/patrullas.routes';
+import { buildMediaRouter } from '@modules/media/media.routes';
+import { UPLOADS_DIR } from '@modules/media/media.storage';
+import { buildCheckpointsRouter } from '@modules/checkpoints/checkpoints.routes';
 import type { Container } from './composition.js';
 
 // Ensamblaje del API HTTP (Express). Respuestas comprimidas con gzip,
@@ -61,6 +64,15 @@ export function createApp(c: Container): express.Express {
   app.use('/api/turnos', buildTurnosRouter(c.tokens));
   app.use('/api/mandados', buildMandadosRouter(c.tokens));
   app.use('/api/patrullas', buildPatrullasRouter(c.tokens));
+  app.use('/api/checkpoints', buildCheckpointsRouter(c.tokens));
+  app.use('/api/media', buildMediaRouter(c.tokens));
+  // Archivos subidos (selfie de turno, evidencia de hecho) — servidos
+  // estáticos desde disco, namespace separado de /api para poder, más
+  // adelante, servirlos directo desde Nginx sin pasar por Node.
+  app.use(
+    '/media',
+    express.static(UPLOADS_DIR, { maxAge: '365d', immutable: true }),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);
