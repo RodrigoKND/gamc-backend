@@ -88,6 +88,7 @@ model Epi {
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   guardias          Guardia[]
+  users             User[]
   rutas             RutaPlantilla[]
   patrullas         Patrulla[]
   hechoes           Hecho[]
@@ -156,8 +157,12 @@ model User {
   ultimoLogin         DateTime? @map("ultimo_login") @db.Timestamptz(6)
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  // Jurisdicción (EPI) del Operador/Admin — restringe crear/asignar/cancelar
+  // rutas a su EPI (mapas.service.ts). null en super_admin = sin restricción.
+  epiId               String?   @map("epi_id") @db.Uuid
 
   role                Role              @relation(fields: [roleId], references: [id])
+  epi                 Epi?              @relation(fields: [epiId], references: [id], onDelete: SetNull)
   creadoPor           User?             @relation("UserCreado", fields: [creadoPorId], references: [id], onDelete: SetNull)
   creados             User[]            @relation("UserCreado")
   guardiasCreados     Guardia[]         @relation("GuardiaCreada")
