@@ -97,9 +97,11 @@ export async function listGuardias(
 ): Promise<{ rows: GuardiaRow[]; total: number }> {
   const where: any = {};
   if (filtros.epiCodigo) {
+    // Código desconocido → lista vacía, no un UUID inventado: antes se
+    // filtraba por '__none__' y Postgres respondía 500 (no es un uuid).
     const epi = await db.epi.findUnique({ where: { codigo: filtros.epiCodigo }, select: { id: true } });
-    if (epi) where.epiId = epi.id;
-    else where.epiId = '__none__';
+    if (!epi) return { rows: [], total: 0 };
+    where.epiId = epi.id;
   }
   if (filtros.estado) where.estado = filtros.estado;
   // La tabla principal de /guardias esconde a los dados de baja (cuenta
