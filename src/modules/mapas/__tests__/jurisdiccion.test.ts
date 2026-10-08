@@ -57,4 +57,44 @@ describe('jurisdicción por EPI', () => {
   it('rechaza geometrías vacías o inválidas', () => {
     expect(() => exigirDentroDeEpi(JURISDICCION, null)).toThrow(/no contiene coordenadas/i);
   });
+
+  // H12 (cambios/02): antes solo se revisaban los VÉRTICES. En una EPI en
+  // forma de U, un tramo entre dos vértices interiores cruzaba el hueco
+  // exterior y el backend lo aceptaba.
+  describe('contención del trazado completo', () => {
+    // U: brazos x∈[-66.20,-66.18] y x∈[-66.15,-66.13], base y∈[-17.40,-17.38];
+    // el hueco (x∈(-66.18,-66.15), y>-17.38) es exterior.
+    const U: Jurisdiccion = {
+      ...JURISDICCION,
+      poligonos: [[[
+        [-66.2, -17.4], [-66.13, -17.4], [-66.13, -17.3], [-66.15, -17.3], [-66.15, -17.38],
+        [-66.18, -17.38], [-66.18, -17.3], [-66.2, -17.3], [-66.2, -17.4],
+      ]]],
+    };
+
+    it('rechaza un tramo cuyos dos extremos están dentro pero cruza el exterior', () => {
+      expect(() => exigirDentroDeEpi(U, [[-66.19, -17.33], [-66.14, -17.33]])).toThrow(/sale de los límites/i);
+    });
+
+    it('acepta el mismo recorrido si rodea la U por dentro', () => {
+      expect(() => exigirDentroDeEpi(U, [[-66.19, -17.33], [-66.19, -17.39], [-66.14, -17.39], [-66.14, -17.33]])).not.toThrow();
+    });
+
+    it('rechaza el salto entre dos islas de un MultiPolygon', () => {
+      const islas: Jurisdiccion = {
+        ...JURISDICCION,
+        poligonos: [
+          [[[-66.2, -17.4], [-66.18, -17.4], [-66.18, -17.38], [-66.2, -17.38], [-66.2, -17.4]]],
+          [[[-66.15, -17.4], [-66.13, -17.4], [-66.13, -17.38], [-66.15, -17.38], [-66.15, -17.4]]],
+        ],
+      };
+      expect(() => exigirDentroDeEpi(islas, [[-66.19, -17.39], [-66.14, -17.39]])).toThrow(/sale de los límites/i);
+      expect(() => exigirDentroDeEpi(islas, { type: 'Point', coordinates: [-66.14, -17.39] })).not.toThrow();
+    });
+
+    it('rechaza coordenadas no finitas o fuera de rango en vez de ignorarlas', () => {
+      expect(() => exigirDentroDeEpi(JURISDICCION, [[-66.15, -17.35], [Number.NaN, -17.35]])).toThrow(/no contiene coordenadas/i);
+      expect(() => exigirDentroDeEpi(JURISDICCION, [[-66.15, -17.35], [-266, -17.35]])).toThrow(/no contiene coordenadas/i);
+    });
+  });
 });
