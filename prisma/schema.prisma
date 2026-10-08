@@ -91,7 +91,17 @@ model Epi {
   activo    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  // Catálogo v2 (migración 0006, inventario oficial de 6 EPIs).
+  numero        Int?    @db.SmallInt
+  nombreOficial String? @map("nombre_oficial")
+  color         String?
+  sedeLat       Float?  @map("sede_lat")
+  sedeLng       Float?  @map("sede_lng")
+  sedeDireccion String? @map("sede_direccion")
+  telefonos     Json?
 
+  territorios       EpiTerritorio[]
+  modulos           ModuloPolicial[]
   guardias          Guardia[]
   users             User[]
   rutas             RutaPlantilla[]
@@ -100,6 +110,48 @@ model Epi {
   zonaCriticas      ZonaCriticaActiva[]
 
   @@map("epi")
+}
+
+// Territorio versionado de cada EPI (0006). `epi.poligono` queda como la
+// versión 1 legado; el código lee la versión `vigente` de esta tabla.
+model EpiTerritorio {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  epiId      String   @map("epi_id") @db.Uuid
+  version    Int
+  poligono   Json
+  origen     String
+  aproximado Boolean  @default(true)
+  vigente    Boolean  @default(false)
+  notas      String?
+  creadoEn   DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  epi Epi @relation(fields: [epiId], references: [id])
+
+  @@unique([epiId, version])
+  @@map("epi_territorio")
+}
+
+// Módulos policiales del inventario oficial (0006). Las coordenadas no son
+// únicas: MP-511 y FELCV Uspha Uspha comparten punto.
+model ModuloPolicial {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                 String   @unique
+  nombre                 String
+  epiId                  String   @map("epi_id") @db.Uuid
+  direccion              String?
+  zona                   String?
+  lat                    Float
+  lng                    Float
+  coordenadasAproximadas Boolean  @default(false) @map("coordenadas_aproximadas")
+  telefono               String?
+  estado                 String?
+  activo                 Boolean  @default(true)
+  fuente                 String
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  epi Epi @relation(fields: [epiId], references: [id])
+
+  @@map("modulo_policial")
 }
 
 model Role {

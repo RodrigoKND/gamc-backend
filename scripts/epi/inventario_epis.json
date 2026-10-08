@@ -1,0 +1,112 @@
+{
+  "fuente": "manual/INVENTARIO EPIS COCHABAMBA.docx (Hoja de Trámite N° 024549/2026, Oficio DSC-CE-N° 427/2026)",
+  "notas": [
+    "Coordenadas [lat, lng]. Las de Coña Coña vienen en grados/minutos/segundos en el documento y se convirtieron a decimal.",
+    "Los módulos de Central traen longitudes redondeadas (-66.170000, -66.150000, -66.180000): se marcan como aproximadas.",
+    "MP 511 y FELCV Uspha Uspha comparten coordenadas: son unidades distintas, no se deduplican.",
+    "Los códigos tienen huecos reales (no existen MP 102, 105, 106, 108, 209, 606): no se inventan."
+  ],
+  "epis": [
+    {
+      "codigo": "sud", "numero": 1, "nombre": "EPI Sur", "nombreOficial": "Estación Policial Integral N° 1 \"Sur\"",
+      "color": "#F5A623",
+      "sede": { "lat": -17.444305, "lng": -66.165342, "direccion": "Avenida Panamericana, frente a la Iglesia San Marcos" },
+      "telefonos": [ { "tipo": "whatsapp", "numero": "57710101" } ],
+      "modulos": [
+        { "codigo": "MP-101", "nombre": "1ro. de Mayo", "direccion": "Calle Innominada", "zona": "Cercado Sur", "lat": -17.467930, "lng": -66.202547 },
+        { "codigo": "MP-103", "nombre": "Villa Israel", "direccion": "Entrada Principal", "zona": "Distrito 15", "lat": -17.487039, "lng": -66.174968 },
+        { "codigo": "MP-104", "nombre": "Molle Molle", "direccion": "Calle Innominada", "zona": "Distrito 9", "lat": -17.455392, "lng": -66.157324 },
+        { "codigo": "MP-107", "nombre": "Pampa San Miguel", "direccion": "Av. Autonomía", "zona": "Distrito 15", "lat": -17.471444, "lng": -66.136361 },
+        { "codigo": "MP-109", "nombre": "Arrumani Norte", "direccion": "Calle Innominada", "zona": "Distrito 15", "lat": -17.478882, "lng": -66.131355 }
+      ]
+    },
+    {
+      "codigo": "norte", "numero": 2, "nombre": "EPI Norte", "nombreOficial": "Estación Policial Integral N° 2 \"Norte\"",
+      "color": "#5DADE2",
+      "sede": { "lat": -17.361659, "lng": -66.172665, "direccion": "Av. Melchor Pérez de Olguín y Calle Franklin D. Roosevelt" },
+      "telefonos": [ { "tipo": "fijo", "numero": "44444151" }, { "tipo": "fijo", "numero": "44444155" }, { "tipo": "whatsapp", "numero": "67522654" } ],
+      "modulos": [
+        { "codigo": "MP-201", "nombre": "Condebamba", "direccion": "C. Pirpinto e Iripitan y Sumaj Jatia, Zona Condebamba", "lat": -17.352689, "lng": -66.178062 },
+        { "codigo": "MP-202", "nombre": "Condebamba (Thomas Mann)", "direccion": "C. Thomas Mann e/ Torrentera Cantarrana, Condebamba", "lat": -17.362678, "lng": -66.155470 },
+        { "codigo": "MP-203", "nombre": "Pacata Baja", "direccion": "Pacata Baja, Av. Circunvalación e/ C. Pariente y M. Daza", "lat": -17.373177, "lng": -66.123001 },
+        { "codigo": "MP-204", "nombre": "Aranjuez Alto", "direccion": "C. final Eudoro Galindo y Las Buganvillas, Aranjuez Alto", "lat": -17.360721, "lng": -66.142592 },
+        { "codigo": "MP-205", "nombre": "Mesadilla", "direccion": "Av. José Espinoza y C. Josef Guevara, Zona Mesadilla", "lat": -17.367303, "lng": -66.129187 },
+        { "codigo": "MP-206", "nombre": "Tirani", "direccion": "Calles Innominadas, Zona Tirani (Colegio Carrillo)", "lat": -17.344367, "lng": -66.156577 },
+        { "codigo": "MP-207", "nombre": "Condebamba Mz 441", "direccion": "C. Rucu e/ Calle 10, Condebamba Mz 441", "lat": -17.340196, "lng": -66.171531 },
+        { "codigo": "MP-208", "nombre": "Barrio Minero 10 de Diciembre", "direccion": "Barrio Minero 10 de Diciembre, Pacata Alta", "lat": -17.367996, "lng": -66.122921 },
+        { "codigo": "MP-210", "nombre": "Condebamba Mz 195", "direccion": "Av. Ecológica e/ Av. Centenario, Condebamba Mz 195", "lat": -17.354057, "lng": -66.168041 }
+      ]
+    },
+    {
+      "codigo": "jaihuayco", "numero": 3, "nombre": "EPI Jaihuayco", "nombreOficial": "Estación Policial Integral N° 3 \"Jaihuayco\"",
+      "color": "#E57399",
+      "sede": { "lat": -17.4269086, "lng": -66.1611430, "direccion": "Calle Manuel Virreira y Calle Lizandro e/ C. Daniel Arauco" },
+      "telefonos": [ { "tipo": "fijo", "numero": "4444177" } ],
+      "modulos": [
+        { "codigo": "MP-301", "nombre": "Loreto", "direccion": "Av. Panamericana y C. J.R. Molina, frente a Parroquia María Auxiliadora", "lat": -17.4212443, "lng": -66.1577884 },
+        { "codigo": "MP-302", "nombre": "Virgen de Guadalupe", "direccion": "Calle Virgen de Guadalupe y Calle Tomás de Aquino", "lat": -17.435529, "lng": -66.157362 },
+        { "codigo": "MP-303", "nombre": "Villa Cosmos", "direccion": "Av. Sofía Rossel, al lado de la cancha Multifuncional Villa Cosmos", "lat": -17.424872, "lng": -66.148730 },
+        { "codigo": "MP-304", "nombre": "Guaqui", "direccion": "Calle C. Guaqui entre calle Colomi y Av. Fuerza Aérea", "lat": -17.411953, "lng": -66.165750 },
+        { "codigo": "MP-305", "nombre": "Llallipacha", "direccion": "Calle Rafael Bustillos y Llallipacha", "lat": -17.414137, "lng": -66.146841 },
+        { "codigo": "MP-306", "nombre": "Colina San Miguel", "direccion": "OTB Colina San Miguel, Av. Ayllu e Ignacio Chuquimanawi", "lat": -17.404485, "lng": -66.147985 }
+      ]
+    },
+    {
+      "codigo": "cona_cona", "numero": 4, "nombre": "EPI Coña Coña", "nombreOficial": "Estación Policial Integral N° 4 \"Coña Coña\"",
+      "color": "#8E6FCE",
+      "sede": { "dms": "17°23'23.5\"S 66°12'12.8\"W", "direccion": "C/ José Napoleón Medrano, C. Pedro Nolasco y C. Pedro Arzeta, Zona Coña Coña" },
+      "telefonos": [ { "tipo": "fijo", "numero": "4444189" } ],
+      "modulos": [
+        { "codigo": "MP-401", "nombre": "OTB San José", "direccion": "C/Rafael Torrico y Av. Dorvigny", "dms": "17°23'10.8\"S 66°11'52.5\"W" },
+        { "codigo": "MP-402", "nombre": "OTB Quijarro", "direccion": "Cmons J. de Dios e/ Av. Thadeo Haenke y C/Primo Arrieta", "dms": "17°22'53.0\"S 66°12'06.5\"W" },
+        { "codigo": "MP-403", "nombre": "OTB Villa Bush Norte", "direccion": "C/Mises Monrroy e/ C/Auza y C/Montero", "dms": "17°23'27.3\"S 66°11'39.6\"W", "telefono": "4444192" },
+        { "codigo": "MP-404", "nombre": "OTB Villa Bush Sud", "direccion": "C/Abel Rivas e/ C/Leonardo Da Vinci y C/Benjamín Franklin", "dms": "17°23'43.3\"S 66°11'41.7\"W" },
+        { "codigo": "MP-405", "nombre": "OTB Pampa Grande", "direccion": "Av. Cap. Ustaris Km 1 1/2 y anterior de la Vía y R. Ronald Rosso", "dms": "17°23'49.9\"S 66°12'27.7\"W", "telefono": "4444194" },
+        { "codigo": "MP-406", "nombre": "OTB Villa Mercedes", "direccion": "Calle 23 de Marzo y Calle Adrián Patiño", "dms": "17°23'17.8\"S 66°11'17.4\"W" },
+        { "codigo": "MP-407", "nombre": "OTB Topater", "direccion": "Calle Chiriguano e/ C/ Arawaqui y 23 de Enero", "dms": "17°22'26.2\"S 66°11'23.5\"W", "telefono": "4444196" },
+        { "codigo": "MP-408", "nombre": "OTB Rosario", "direccion": "Av. Daniel Campos y C/ Mons. Ángel Caballero", "dms": "17°23'52.3\"S 66°10'43.9\"W" },
+        { "codigo": "MP-409", "nombre": "OTB Hellein", "direccion": "Av. Berlios e/ C/ Néstor Olnos y C/ Nicolás Paganini", "dms": "17°21'58.8\"S 66°11'27.8\"W" },
+        { "codigo": "MP-410", "nombre": "OTB Villa Victoria", "direccion": "Calle Juan e/ Jorge Udaeta y Luis Montaño Milán", "dms": "17°22'46.1\"S 66°11'39.5\"W" },
+        { "codigo": "MP-411", "nombre": "OTB 18 de Mayo", "direccion": "Av. Melchor Pérez de Olguín Plaza Excombatientes", "dms": "17°23'05.5\"S 66°10'40.2\"W" },
+        { "codigo": "MP-412", "nombre": "OTB Profesional", "direccion": "C/J.M. Velasco e/ Susana Azogue y C/ Miguel Ángel Valda", "dms": "17°22'00.9\"S 66°11'08.0\"W" },
+        { "codigo": "MP-413", "nombre": "OTB Magisterio Rural Sarco", "direccion": "C/César Achaval e/ C/ Manuel Paredes y Av. América", "dms": "17°22'14.2\"S 66°10'52.2\"W", "telefono": "4444202" },
+        { "codigo": "MP-414", "nombre": "OTB Parque Escuela", "direccion": "Av. Gral. Campero e/ Av. Kilómetro", "dms": "17°23'54.9\"S 66°10'10.8\"W" }
+      ]
+    },
+    {
+      "codigo": "alalay_sud", "numero": 5, "nombre": "EPI Alalay Sud", "nombreOficial": "Estación Policial Integral N° 5 \"Alalay Sud\"",
+      "color": "#9CCC65",
+      "sede": { "lat": -17.446935, "lng": -66.126348, "direccion": "Calle Bélgica entre C. Guinea y Brasilia" },
+      "telefonos": [ { "tipo": "whatsapp", "numero": "63980022" } ],
+      "modulos": [
+        { "codigo": "MP-501", "nombre": "OTB Villa Pagador", "direccion": "Calle Saucari y Humberto Assin", "lat": -17.438265, "lng": -66.115247, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-502", "nombre": "Barrio Magisterio", "direccion": "Avenida Guayacán y Los Ángeles", "lat": -17.422889, "lng": -66.123293, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-503", "nombre": "OTB Alto Mirador", "direccion": "Calle Innominada", "lat": -17.430829, "lng": -66.137327, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-504", "nombre": "OTB Alta Tensión San Miguel", "direccion": "Calle MOPAS y Arnulfo Romero", "lat": -17.439161, "lng": -66.130777, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-505", "nombre": "OTB Mula Mayu", "direccion": "Calle Bolivia e Italia", "lat": -17.441973, "lng": -66.128473, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-506", "nombre": "OTB San Miguel de Arcángel", "direccion": "Calle Pedro Toledo", "lat": -17.442177, "lng": -66.141090, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-507", "nombre": "OTB Alto Mirador (Av. Pisiga)", "direccion": "Avenida Pisiga", "lat": -17.455644, "lng": -66.112340, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-508", "nombre": "OTB Nueva Vera Cruz", "direccion": "Calle San Simón y Calle San Luis", "lat": -17.462728, "lng": -66.116554, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-509", "nombre": "OTB Lomas de Santa Bárbara", "direccion": "Calle Innominada", "lat": -17.461988, "lng": -66.104304, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-510", "nombre": "OTB Minero San Juan", "direccion": "Calle Innominada", "lat": -17.481201, "lng": -66.104253, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "MP-511", "nombre": "OTB Uspha Uspha", "direccion": "Calle Innominada", "lat": -17.474435, "lng": -66.109601, "estado": "En mantenimiento / funcionando" },
+        { "codigo": "FELCV-USPHA", "nombre": "FELCV Uspha Uspha", "direccion": "Calle Innominada", "lat": -17.474435, "lng": -66.109601, "estado": "Servicio de emergencia / despacho" }
+      ]
+    },
+    {
+      "codigo": "central", "numero": 6, "nombre": "EPI Central", "nombreOficial": "Estación Policial Integral N° 6 \"Central\"",
+      "color": "#26A69A",
+      "sede": { "lat": -17.401111, "lng": -66.157417, "direccion": "Calle Ismael Montes y Av. Ayacucho" },
+      "telefonos": [ { "tipo": "fijo_whatsapp", "numero": "72794299" } ],
+      "modulos": [
+        { "codigo": "MP-601", "nombre": "Parque Carmela Cerruto", "direccion": "Parque Carmela Cerruto C. Kantutas", "lat": -17.398139, "lng": -66.150000, "aproximada": true, "estado": "En funcionamiento" },
+        { "codigo": "MP-602", "nombre": "Humboldt", "direccion": "Humboldt y C. Virrey de Francisco Toledo", "lat": -17.390778, "lng": -66.170000, "aproximada": true, "estado": "En refacción" },
+        { "codigo": "MP-603", "nombre": "Fernando de Soto", "direccion": "Calle Fernando de Soto y Diego de Almagro", "lat": -17.390722, "lng": -66.170000, "aproximada": true, "estado": "En funcionamiento" },
+        { "codigo": "MP-604", "nombre": "Gabriel René Moreno", "direccion": "Av. Gabriel René Moreno y Lucas Mendoza", "lat": -17.374167, "lng": -66.170000, "aproximada": true, "estado": "En funcionamiento" },
+        { "codigo": "MP-605", "nombre": "Demetrio Canelas", "direccion": "Av. Demetrio Canelas y Av. Gabriel René Moreno", "lat": -17.379722, "lng": -66.170000, "aproximada": true, "estado": "En funcionamiento" },
+        { "codigo": "MP-607", "nombre": "Teófilo Vargas", "direccion": "Av. Teófilo Vargas y C. George Washington", "lat": -17.376139, "lng": -66.170000, "aproximada": true, "estado": "En funcionamiento" },
+        { "codigo": "MP-608", "nombre": "La Madrid", "direccion": "Av. La Madrid C. Nueva Castilla", "lat": -17.389861, "lng": -66.180000, "aproximada": true, "estado": "En funcionamiento" }
+      ]
+    }
+  ]
+}
