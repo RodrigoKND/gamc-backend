@@ -16,7 +16,8 @@ const createUserSchema = z.object({
   ci: z.string().trim().min(4).max(20).optional().nullable(),
   telefono: z.string().trim().max(20).optional().nullable(),
   fechaNacimiento: z.string().optional().nullable(),
-  epiCodigo: z.enum(['norte', 'central', 'sud', 'cona_cona', 'centro_cercado']).optional().nullable(),
+  // Código del catálogo dinámico (/api/epis); el servicio valida que exista y esté activa.
+  epiCodigo: z.string().trim().min(2).max(40).optional().nullable(),
 });
 
 export function buildUsuariosRouter(tokens: TokenService): Router {

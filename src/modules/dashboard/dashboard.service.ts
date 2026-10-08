@@ -37,7 +37,7 @@ export async function kpis() {
 
 interface DiaRow { dia: string; total: bigint }
 interface TipoRow { tipo: string; total: bigint }
-interface ZonaRow { zona: string | null; total: bigint }
+interface ZonaRow { zona: string | null; epiCodigo: string | null; total: bigint }
 
 // generate_series + LEFT JOIN en vez de un GROUP BY simple: un GROUP BY puro
 // nunca produce una fila para un día sin hechos, así que la gráfica del
@@ -67,10 +67,13 @@ export async function hechosPorTipo() {
 
 export async function hechosPorZona() {
   const rows = await db.$queryRaw<ZonaRow[]>`
-    select e.nombre as zona, count(h.id)::bigint as total
+    select e.nombre as zona, e.codigo as "epiCodigo", count(h.id)::bigint as total
     from hecho h
     left join epi e on e.id = h.epi_id
-    group by e.nombre
+    group by e.nombre, e.codigo
     order by total desc`;
-  return rows.map((r) => ({ zona: r.zona ?? 'Sin EPI', total: Number(r.total) }));
+  // `epiCodigo` (aditivo, cambios/04 F1): la Web identifica la EPI por
+  // código; antes adivinaba el slug desde el nombre y lo desconocido caía
+  // en "Centro".
+  return rows.map((r) => ({ zona: r.zona ?? 'Sin EPI', epiCodigo: r.epiCodigo ?? null, total: Number(r.total) }));
 }
