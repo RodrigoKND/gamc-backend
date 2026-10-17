@@ -2,7 +2,10 @@
 -- Restaura nombres y estado de las EPIs base, y elimina lo agregado.
 -- Las EPIs nuevas solo se borran si nada las referencia; si hay datos
 -- que ya las usan, la reversión se detiene para no perder información.
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 DO $$
 DECLARE n integer;
 BEGIN
@@ -29,4 +32,7 @@ ALTER TABLE epi DROP COLUMN IF EXISTS numero, DROP COLUMN IF EXISTS nombre_ofici
   DROP COLUMN IF EXISTS sede_lat, DROP COLUMN IF EXISTS sede_lng, DROP COLUMN IF EXISTS sede_direccion, DROP COLUMN IF EXISTS telefonos;
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0006_epi_catalogo_inventario'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif

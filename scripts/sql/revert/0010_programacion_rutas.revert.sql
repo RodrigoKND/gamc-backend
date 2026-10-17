@@ -3,7 +3,10 @@
 -- con guardias): hay que cancelarlos antes desde la web. Las ejecuciones ya
 -- cerradas que salieron de una programación se conservan, pero pierden la
 -- referencia a su programación y horario (las columnas se eliminan).
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 
 DO $$
 BEGIN
@@ -30,4 +33,7 @@ DROP TABLE IF EXISTS ruta_programacion;
 
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0010_programacion_rutas'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif

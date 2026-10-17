@@ -2,7 +2,10 @@
 -- Restaura la vista original, quita permisos/tablas/columnas agregadas.
 -- Las patrullas creadas mientras 0007 estuvo activa se conservan (solo pierden
 -- el vínculo a su ejecución y el estado de desvío).
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 CREATE OR REPLACE VIEW v_patrulla_vigente AS
 SELECT p.id, p.guardia_id, p.ruta_plantilla_id, p.epi_id, p.asignado_por, p.estado, p.fecha,
        p.hora_inicio_prevista, p.notas, p.nombre, p.descripcion, p.poligono_geojson, p.turno_id,
@@ -26,4 +29,7 @@ ALTER TABLE ruta_plantilla DROP CONSTRAINT IF EXISTS ck_ruta_plantilla_capacidad
 ALTER TABLE ruta_plantilla DROP COLUMN IF EXISTS tipo, DROP COLUMN IF EXISTS duracion_min, DROP COLUMN IF EXISTS capacidad;
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0007_ruta_ejecucion'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif

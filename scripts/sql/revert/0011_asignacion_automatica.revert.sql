@@ -3,7 +3,10 @@
 -- automáticos abiertos: hay que pasarlas a manual (o eliminarlas) y cancelar
 -- esos horarios desde la web antes de revertir. Se pierde el historial de
 -- intentos automáticos (tabla asignacion_automatica_intento).
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 
 DO $$
 BEGIN
@@ -33,4 +36,7 @@ ALTER TABLE ruta_programacion
 
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0011_asignacion_automatica'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif
