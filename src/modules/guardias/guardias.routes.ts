@@ -15,6 +15,8 @@ import {
   setEstadoOperativo,
   updateGuardia,
 } from "./guardias.service.js";
+import { atenderSos } from "./sos.service.js";
+import { alcanceOVacio } from "@modules/mapas/jurisdiccion";
 
 const updateSchema = z.object({
   primerNombre: z.string().trim().min(2).max(60).optional(),
@@ -48,15 +50,20 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
   router.get(
     "/",
     authorize("guardias", "ver"),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req: AuthRequest, res) => {
       const q = typeof req.query.q === 'string' ? req.query.q : undefined;
       const epi = typeof req.query.epi === 'string' ? req.query.epi : typeof req.query.epiCodigo === 'string' ? req.query.epiCodigo : undefined;
+      const epiActual = typeof req.query.epiActual === 'string' && req.query.epiActual ? req.query.epiActual : undefined;
       const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
       const estadoOperativo = typeof req.query.estadoOperativo === 'string' ? req.query.estadoOperativo : undefined;
       const excluirInactivos = req.query.excluirInactivos === '1' || req.query.excluirInactivos === 'true';
       const page = req.query.page ? Number(req.query.page) : undefined;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
-      const { rows, total } = await listGuardias(true, { q, epiCodigo: epi, estado, estadoOperativo, excluirInactivos, page, pageSize });
+      const { rows, total } = await listGuardias(
+        true,
+        { q, epiCodigo: epi, epiActual, estado, estadoOperativo, excluirInactivos, page, pageSize },
+        await alcanceOVacio(req.principal!),
+      );
       res.json({ data: rows, meta: { total, page, pageSize } });
     }),
   );
@@ -83,8 +90,8 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
   router.get(
     "/:id",
     authorize("guardias", "ver"),
-    asyncHandler(async (req, res) => {
-      const guardia = await getGuardia(req.params.id!!);
+    asyncHandler(async (req: AuthRequest, res) => {
+      const guardia = await getGuardia(req.params.id!!, await alcanceOVacio(req.principal!));
       if (!guardia)
         return res
           .status(404)
@@ -142,6 +149,21 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
         req.principal!.id,
       );
       res.json({ data: guardia });
+    }),
+  );
+
+  // Atención explícita de SOS (F2): permiso propio `sos:editar` (antes hacía
+  // falta `guardias:editar`, que además habilita editar fichas y cuentas).
+  // `alertaIds` = las alertas que el operador vio; sin él, todas las abiertas.
+  router.post(
+    "/:id/sos/atender",
+    authorize("sos", "editar"),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const { alertaIds } = validate(
+        z.object({ alertaIds: z.array(z.string().regex(/^\d+$/)).max(100).optional() }),
+        req.body ?? {},
+      );
+      res.json({ data: await atenderSos(req.params.id!, req.principal!.id, alertaIds) });
     }),
   );
 

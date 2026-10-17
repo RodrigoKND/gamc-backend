@@ -1,8 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import { db } from '@infra/database';
 import { Errors } from '@shared/errors';
-import { EVENTS, publish } from '@infra/realtime';
+import { EVENTS, publish, publishTerritorial } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
+import { salirDeRutaPorFinDeTurno } from '@modules/ejecuciones/ejecuciones.service';
+import { whereVigente } from '@modules/mapas/mapas.service';
 
 // Turno / servicio del guardia (BD_UNIFICADA §5.1). Lo escribe SOLO el móvil;
 // la web lo lee por sus propios endpoints. `distancia_metros` la calcula la
@@ -60,21 +62,21 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
   });
   if (abierto) throw Errors.conflict('Ya tiene un turno en servicio. Ciérrelo antes de iniciar otro.');
 
-  // Patrulla a enlazar: la indicada (si es suya) o la vigente del día.
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
+  // Patrulla a enlazar: la asignación VIGENTE del guardia (como máximo una,
+  // F2): ejecución abierta dentro de su ventana, o fila vieja del día local de
+  // Bolivia. Antes se comparaba con la medianoche del proceso (`fecha >= hoy`),
+  // que además aceptaba asignaciones de días futuros.
   const patrulla = await db.patrulla.findFirst({
     where: {
+      ...whereVigente(),
       guardiaId: input.guardiaId,
-      estado: { in: ['asignada', 'en_curso'] },
-      fecha: { gte: hoy },
       ...(input.patrullaId ? { id: input.patrullaId } : {}),
     },
     orderBy: { createdAt: 'desc' },
-    select: { id: true },
+    select: { id: true, epiId: true, ejecucion: { select: { epiId: true } } },
   });
   if (input.patrullaId && !patrulla) {
-    throw Errors.validation('La patrulla indicada no existe, no es suya o no es del día.');
+    throw Errors.validation('La patrulla indicada no existe, no es suya o ya no está vigente.');
   }
 
   let estadoResultante: 'en_servicio' | 'emergencia' = 'en_servicio';
@@ -138,7 +140,7 @@ export async function iniciarTurno(input: IniciarTurnoInput): Promise<TurnoRow> 
   // Si el guardia tenía una patrulla asignada, ahora pasa a en_curso — el
   // mapa de la web debe enterarse sin esperar polling.
   if (patrulla) {
-    publish(EVENTS.patrullaAsignada, {
+    publishTerritorial(EVENTS.patrullaAsignada, patrulla.ejecucion?.epiId ?? patrulla.epiId, {
       id: patrulla.id,
       guardiaId: input.guardiaId,
       estado: 'en_curso',
@@ -177,10 +179,9 @@ export async function cerrarTurno(input: CerrarTurnoInput): Promise<TurnoRow> {
         distanciaMetros: distancia ?? 0,
       },
     });
-    await tx.patrulla.updateMany({
-      where: { turnoId: input.turnoId, estado: 'en_curso' },
-      data: { estado: 'completada', completadaEn: new Date() },
-    });
+    // El guardia sale de su ruta al cerrar turno (en TODAS las rutas, decisión
+    // del usuario F2): la ruta sigue con los demás y, si queda vacía, se cierra.
+    await salirDeRutaPorFinDeTurno(tx, input.guardiaId);
     // Mismo blindaje que iniciarTurno: cerrar turno tampoco saca a un
     // guardia de 'emergencia' sin resolver — solo el operador.
     const actual = await tx.guardia.findUnique({ where: { id: input.guardiaId }, select: { estadoOperativo: true } });
@@ -280,6 +281,44 @@ export interface RecorridoQueryInput {
   guardiaId?: string;
   desde?: string;
   hasta?: string;
+}
+
+/**
+ * Recorridos y alcance (F3): la supervisión global ve el
+ * historial completo. Un Operador/Admin de una EPI solo ve los tramos en los
+ * que el guardia cumplía una ruta de SU EPI (desde que se le asignó hasta que
+ * terminó), nunca todo su historial por verlo en el mapa.
+ */
+export async function ventanasAutorizadas(guardiaId: string, epiId: string): Promise<{ desde: Date; hasta: Date }[]> {
+  const patrullas = await db.patrulla.findMany({
+    where: { guardiaId, OR: [{ ejecucion: { epiId } }, { ejecucionId: null, epiId }] },
+    select: {
+      estado: true, iniciadaEn: true, createdAt: true, completadaEn: true,
+      ejecucion: { select: { inicio: true, fin: true, cerradaEn: true, estado: true } },
+    },
+  });
+  const ahora = new Date();
+  return patrullas.flatMap((p) => {
+    const activa = p.estado === 'asignada' || p.estado === 'en_curso';
+    // Una fila histórica sin cierre fiable no autoriza GPS posterior.
+    if (!activa && !p.completadaEn) return [];
+    const e = p.ejecucion;
+    if (e && ['finalizada', 'cancelada'].includes(e.estado) && !e.cerradaEn && !p.completadaEn) return [];
+    // Una reserva anterior al inicio del horario tampoco autoriza su GPS.
+    const desde = new Date(Math.max((p.iniciadaEn ?? p.createdAt).getTime(), e?.inicio.getTime() ?? 0));
+    const hasta = new Date(Math.min(
+      ahora.getTime(),
+      p.completadaEn?.getTime() ?? Infinity,
+      e?.fin?.getTime() ?? Infinity,
+      e?.cerradaEn?.getTime() ?? Infinity,
+    ));
+    return desde <= hasta ? [{ desde, hasta }] : [];
+  });
+}
+
+export function recortarRecorrido(r: RecorridoResult, ventanas: { desde: Date; hasta: Date }[]): RecorridoResult {
+  const puntos = r.puntos.filter((p) => ventanas.some((v) => p.capturadoEn >= v.desde && p.capturadoEn <= v.hasta));
+  return { ...r, puntos, total: puntos.length, distanciaMetros: puntos.length === r.puntos.length ? r.distanciaMetros : null };
 }
 
 export async function recorridoQuery(q: RecorridoQueryInput): Promise<RecorridoResult> {

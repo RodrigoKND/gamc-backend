@@ -31,12 +31,16 @@ const TIPOS_HECHO = [
   ['otro', 'Otro', 999],
 ] as const;
 
+// Nombres del catálogo v2 (migración 0006, inventario oficial). La
+// migración ya crea/actualiza las 6 EPIs; esto solo evita que re-sembrar
+// vuelva a los nombres viejos. Centro Cercado no se re-crea ni se reactiva.
 const EPIS = [
+  ['sud', 'EPI Sur'],
   ['norte', 'EPI Norte'],
-  ['central', 'EPI Central'],
-  ['sud', 'EPI Sud'],
+  ['jaihuayco', 'EPI Jaihuayco'],
   ['cona_cona', 'EPI Coña Coña'],
-  ['centro_cercado', 'EPI Centro Cercado'],
+  ['alalay_sud', 'EPI Alalay Sud'],
+  ['central', 'EPI Central'],
 ] as const;
 
 // Matriz role → (recurso, ver, crear, editar, eliminar) — idéntica a la del schema.sql.

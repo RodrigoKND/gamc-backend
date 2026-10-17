@@ -22,6 +22,9 @@ import { buildPatrullasRouter } from '@modules/patrullas/patrullas.routes';
 import { buildMediaRouter } from '@modules/media/media.routes';
 import { UPLOADS_DIR } from '@modules/media/media.storage';
 import { buildCheckpointsRouter } from '@modules/checkpoints/checkpoints.routes';
+import { buildEpisRouter } from '@modules/epis/epis.routes';
+import { buildPuntosFijosRouter } from '@modules/puntos-fijos/puntosFijos.routes';
+import { buildProgramacionRouter } from '@modules/programacion/programacion.routes';
 import type { Container } from './composition.js';
 
 // Ensamblaje del API HTTP (Express). Respuestas comprimidas con gzip,
@@ -56,6 +59,9 @@ export function createApp(c: Container): express.Express {
   app.use('/api/guardias', buildGuardiasRouter(c.tokens));
   app.use('/api/hechos', buildHechosRouter(c.tokens));
   app.use('/api/mapas', buildMapasRouter(c.tokens));
+  app.use('/api/epis', buildEpisRouter(c.tokens));
+  app.use('/api/puntos-fijos', buildPuntosFijosRouter(c.tokens));
+  app.use('/api/programaciones', buildProgramacionRouter(c.tokens));
   app.use('/api/dashboard', buildDashboardRouter(c.tokens));
   app.use('/api/usuarios', buildUsuariosRouter(c.tokens));
   app.use('/api/auditoria', buildAuditoriaRouter(c.tokens));
