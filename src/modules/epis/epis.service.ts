@@ -1,7 +1,7 @@
 import { db } from '@infra/database';
 import { poligonosDe, puntoEnTerritorio, type PolygonCoords } from './geometria.js';
 
-// Catálogo EPI dinámico (cambios/04 F1). Única fuente para la Web (lista,
+// Catálogo EPI dinámico. Única fuente para la Web (lista,
 // colores, sedes, mapa) y para el backend (jurisdicción, clasificación de
 // puntos). Antes cada capa tenía su propia lista fija de 5 EPIs.
 //

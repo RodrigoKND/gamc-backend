@@ -4,7 +4,7 @@ import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate } from '@modules/auth/http/middlewares';
 import { catalogoEpis, modulosPoliciales } from './epis.service.js';
 
-// Catálogo EPI (cambios/04 F1). Datos institucionales públicos (nombres,
+// Catálogo EPI. Datos institucionales públicos (nombres,
 // sedes, teléfonos, territorios aproximados): basta con estar autenticado,
 // igual para la Web que para la app.
 export function buildEpisRouter(tokens: TokenService): Router {

@@ -9,14 +9,34 @@ import {
   requireGuardia,
   type AuthRequest,
 } from '@modules/auth/http/middlewares';
+import { alcanceDe } from '@modules/mapas/jurisdiccion';
 import {
   changeHechoEstado,
+  clasificarHechoManual,
   countHechos,
   crearHechoMovil,
+  exportarHechos,
+  getHecho,
   listHechos,
   listHechosDeGuardia,
   listTiposHecho,
+  type HechoFiltros,
 } from './hechos.service.js';
+import { Errors } from '@shared/errors';
+
+function filtrosDe(query: Record<string, unknown>): HechoFiltros {
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  return {
+    q: str(query.q),
+    tipo: str(query.tipo),
+    estado: str(query.estado),
+    epiId: str(query.epiId) ?? str(query.epi),
+    nivelRiesgo: str(query.nivelRiesgo),
+    desde: str(query.desde),
+    hasta: str(query.hasta),
+    clasificacion: str(query.clasificacion),
+  };
+}
 
 const crearMovilSchema = z.object({
   tipoHechoId: z.string().uuid().optional().nullable(),
@@ -66,35 +86,46 @@ export function buildHechosRouter(tokens: TokenService): Router {
         res.json({ data: await listHechosDeGuardia(req.principal!.id) });
         return;
       }
-      // Usuario web: filtros + permiso `hechos:ver`.
+      // Usuario web: filtros + permiso `hechos:ver`, dentro de su alcance
+      // territorial (F3): Operador/Admin ven los hechos de SU EPI.
       authorize('hechos', 'ver')(req, res, () => {
-        const q = typeof req.query.q === 'string' ? req.query.q : undefined;
-        const tipo = typeof req.query.tipo === 'string' ? req.query.tipo : undefined;
-        const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
-        const epiId = typeof req.query.epiId === 'string' ? req.query.epiId : typeof req.query.epi === 'string' ? req.query.epi : undefined;
-        const nivelRiesgo = typeof req.query.nivelRiesgo === 'string' ? req.query.nivelRiesgo : undefined;
-        const desde = typeof req.query.desde === 'string' ? req.query.desde : undefined;
-        const hasta = typeof req.query.hasta === 'string' ? req.query.hasta : undefined;
-        const filtros = { q, tipo, estado, epiId, nivelRiesgo, desde, hasta };
-        // page/pageSize (opcional, aditivo a limit/offset de siempre): cuando
-        // viene, también se pide el total real para pintar controles de
-        // página — antes no había forma de saber cuántos hechos había en
-        // total más allá del corte de `limit` (200 por defecto).
-        const page = req.query.page ? Number(req.query.page) : undefined;
-        if (page) {
-          const pageSize = Math.min(Math.max(req.query.pageSize ? Number(req.query.pageSize) : 20, 1), 100);
-          const offset = Math.max(page - 1, 0) * pageSize;
-          Promise.all([listHechos({ ...filtros, limit: pageSize, offset }), countHechos(filtros)])
-            .then(([data, total]) => res.json({ data, meta: { total, page, pageSize } }))
-            .catch(next);
-          return;
-        }
-        const limit = req.query.limit ? Number(req.query.limit) : undefined;
-        const offset = req.query.offset ? Number(req.query.offset) : undefined;
-        listHechos({ ...filtros, limit, offset })
-          .then((data) => res.json({ data }))
+        const filtros = filtrosDe(req.query);
+        alcanceDe(req.principal!)
+          .then(async (alcance) => {
+            // page/pageSize (opcional, aditivo a limit/offset de siempre):
+            // cuando viene, también se pide el total real.
+            const page = req.query.page ? Number(req.query.page) : undefined;
+            if (page) {
+              const pageSize = Math.min(Math.max(req.query.pageSize ? Number(req.query.pageSize) : 20, 1), 100);
+              const offset = Math.max(page - 1, 0) * pageSize;
+              const [data, total] = await Promise.all([listHechos(alcance, { ...filtros, limit: pageSize, offset }), countHechos(alcance, filtros)]);
+              res.json({ data, meta: { total, page, pageSize } });
+              return;
+            }
+            const limit = req.query.limit ? Number(req.query.limit) : undefined;
+            const offset = req.query.offset ? Number(req.query.offset) : undefined;
+            res.json({ data: await listHechos(alcance, { ...filtros, limit, offset }) });
+          })
           .catch(next);
       });
+    }),
+  );
+
+  // Exportación completa (todas las páginas) dentro del alcance.
+  router.get(
+    '/exportar',
+    authorize('hechos', 'ver'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const r = await exportarHechos(await alcanceDe(req.principal!), filtrosDe(req.query));
+      res.json({ data: r.rows, meta: { total: r.total, truncado: r.truncado } });
+    }),
+  );
+
+  router.get(
+    '/:id',
+    authorize('hechos', 'ver'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await getHecho(req.params.id!, await alcanceDe(req.principal!)) });
     }),
   );
 
@@ -106,8 +137,21 @@ export function buildHechosRouter(tokens: TokenService): Router {
         z.object({ estado: z.enum(['reportado', 'en_revision', 'cerrado']) }),
         req.body,
       );
-      const hecho = await changeHechoEstado(req.params.id!, estado, req.principal!.id);
+      const hecho = await changeHechoEstado(req.params.id!, estado, req.principal!.id, await alcanceDe(req.principal!));
       res.json({ data: hecho });
+    }),
+  );
+
+  // Bandeja de supervisión: solo alcance global decide la EPI de un hecho.
+  router.patch(
+    '/:id/epi',
+    authorize('hechos', 'editar'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const { epiCodigo } = validate(z.object({ epiCodigo: z.string().trim().min(2).max(40) }), req.body);
+      if ((await alcanceDe(req.principal!)).tipo !== 'global') {
+        throw Errors.forbidden('Solo la supervisión global (Super Administrador) clasifica hechos.');
+      }
+      res.json({ data: await clasificarHechoManual(req.params.id!, epiCodigo, req.principal!.id) });
     }),
   );
 

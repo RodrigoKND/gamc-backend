@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/middlewares';
+import { can } from '@shared/policies';
+import { Errors } from '@shared/errors';
+import { desconectarUsuario } from '@infra/realtime';
+import { logAudit } from '@modules/auditoria/auditoria.service';
 import { createUser, listRoles, listUsers, setUserEstado, updateUser } from './usuarios.service.js';
 
 const createUserSchema = z.object({
@@ -55,7 +59,19 @@ export function buildUsuariosRouter(tokens: TokenService): Router {
     authorize('usuarios', 'editar'),
     asyncHandler(async (req: AuthRequest, res) => {
       const patch = validate(createUserSchema.partial(), req.body);
+      // F3: la EPI de una cuenta define qué datos ve y modifica. Cambiarla
+      // exige `jurisdiccion_usuarios` (solo Super Admin); antes bastaba
+      // usuarios.editar, que tiene el Admin, incluso sobre su propia cuenta.
+      const cambiaEpi = patch.epiCodigo !== undefined;
+      if (cambiaEpi && !can(req.principal!.permissions, 'jurisdiccion_usuarios', 'editar')) {
+        throw Errors.forbidden('Solo el Super Administrador puede cambiar la EPI de una cuenta.');
+      }
       const user = await updateUser(req.params.id!, patch);
+      if (cambiaEpi) {
+        await logAudit({ actorUserId: req.principal!.id, accion: 'cambiar_epi_usuario', recurso: 'usuarios', recursoId: req.params.id!, detalle: { epiCodigo: patch.epiCodigo ?? null } });
+        // Sus conexiones en vivo se cierran: al reconectar recibe las salas de su nueva EPI.
+        desconectarUsuario(req.params.id!);
+      }
       res.json({ data: { user } });
     }),
   );

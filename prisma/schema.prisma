@@ -108,6 +108,9 @@ model Epi {
   patrullas         Patrulla[]
   hechoes           Hecho[]
   zonaCriticas      ZonaCriticaActiva[]
+  mandados          Mandado[]
+  ubicacionesActuales GuardiaUbicacionActual[]
+  puntosFijos       PuntoFijo[]
 
   @@map("epi")
 }
@@ -263,6 +266,7 @@ model Guardia {
   telemetrias GuardiaTelemetria[]
   mandados  Mandado[]
   checkpoints Checkpoint[]
+  ubicacionActual GuardiaUbicacionActual?
 
   @@map("guardia")
 }
@@ -306,6 +310,11 @@ model RutaPlantilla {
   trazado     Json?
   activo      Boolean  @default(true)
   modalidad   String?  @map("modalidad")
+  // F2 (0007): establecida | guardada | dinamica. duracionMin = cuánto dura
+  // una asignación de esta ruta (null = sin límite, la cierra el usuario).
+  tipo        String?
+  duracionMin Int?     @map("duracion_min")
+  capacidad   Int?     @db.SmallInt
   creadoPorId String?  @map("creado_por") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -313,8 +322,170 @@ model RutaPlantilla {
   epi       Epi?      @relation(fields: [epiId], references: [id], onDelete: SetNull)
   creadoPor User?     @relation("RutaCreada", fields: [creadoPorId], references: [id], onDelete: SetNull)
   patrullas Patrulla[]
+  ejecuciones RutaEjecucion[]
 
   @@map("ruta_plantilla")
+}
+
+// F2 (0007): una asignación concreta de una ruta. Agrupa a los guardias que
+// la cumplen juntos; trazado copiado (snapshot) para que editar la plantilla
+// no cambie lo ya asignado. fin null = sin límite (ruta dinámica).
+model RutaEjecucion {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rutaPlantillaId String?   @map("ruta_plantilla_id") @db.Uuid
+  epiId           String?   @map("epi_id") @db.Uuid
+  tipo            String
+  nombre          String
+  descripcion     String?
+  modalidad       String
+  capacidad       Int       @db.SmallInt
+  trazado         Json?
+  unidad          String?
+  origen          String    @default("manual")
+  estado          String    @default("activa")
+  inicio          DateTime  @default(now()) @db.Timestamptz(6)
+  fin             DateTime? @db.Timestamptz(6)
+  motivoCierre    String?   @map("motivo_cierre")
+  cerradaEn       DateTime? @map("cerrada_en") @db.Timestamptz(6)
+  cerradaPorId    String?   @map("cerrada_por") @db.Uuid
+  creadoPorId     String?   @map("creado_por") @db.Uuid
+  creadoPorTipo   String    @default("user") @map("creado_por_tipo")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  // F4 (0009): asignación a un punto fijo (raíz) y copia del destino.
+  puntoFijoId     String?   @map("punto_fijo_id") @db.Uuid
+  destino         Json?
+
+  // F5 (0010): horario programado del que salió (null = asignación manual).
+  programacionId      String?   @map("programacion_id") @db.Uuid
+  ventanaId           String?   @map("ventana_id") @db.Uuid
+  fechaLocal          DateTime? @map("fecha_local") @db.Date
+  programacionVersion Int?      @map("programacion_version")
+  apertura            DateTime? @db.Timestamptz(6)
+  // F6 (0011): copia del modo de asignación y estado de los intentos automáticos.
+  asignacionModo      String?   @map("asignacion_modo")
+  autoRadioM          Int?      @map("auto_radio_m")
+  autoProximoIntento  DateTime? @map("auto_proximo_intento") @db.Timestamptz(6)
+  autoIntentos        Int       @default(0) @map("auto_intentos")
+  autoUltimo          Json?     @map("auto_ultimo")
+
+  rutaPlantilla RutaPlantilla?           @relation(fields: [rutaPlantillaId], references: [id])
+  puntoFijo     PuntoFijo?               @relation(fields: [puntoFijoId], references: [id])
+  programacion  RutaProgramacion?        @relation(fields: [programacionId], references: [id])
+  ventana       RutaProgramacionVentana? @relation(fields: [ventanaId], references: [id])
+  patrullas     Patrulla[]
+  intentosAuto  AsignacionAutomaticaIntento[]
+
+  @@map("ruta_ejecucion")
+}
+
+// F5 (0010): qué se cubre (ruta de la biblioteca o punto fijo) y en qué
+// vigencia. Sus ventanas dicen días, hora, duración y cupo.
+model RutaProgramacion {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nombre          String
+  descripcion     String?
+  epiId           String    @map("epi_id") @db.Uuid
+  rutaPlantillaId String?   @map("ruta_plantilla_id") @db.Uuid
+  puntoFijoId     String?   @map("punto_fijo_id") @db.Uuid
+  modalidad       String
+  vigenciaDesde   DateTime  @map("vigencia_desde") @db.Date
+  vigenciaHasta   DateTime? @map("vigencia_hasta") @db.Date
+  zonaHoraria     String    @default("America/La_Paz") @map("zona_horaria")
+  modo            String    @default("manual")
+  // F6 (0011): radio inicial de la búsqueda automática (lo fija el sistema).
+  radioMaxM       Int?      @map("radio_max_m")
+  estado          String    @default("activa")
+  origen          String    @default("manual")
+  version         Int       @default(1)
+  creadoPorId     String?   @map("creado_por") @db.Uuid
+  actualizadoPorId String?  @map("actualizado_por") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  ventanas    RutaProgramacionVentana[]
+  ejecuciones RutaEjecucion[]
+
+  @@map("ruta_programacion")
+}
+
+model RutaProgramacionVentana {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  programacionId String   @map("programacion_id") @db.Uuid
+  /// 1 = lunes … 7 = domingo (ISO).
+  dias           Int[]    @db.SmallInt
+  horaInicio     DateTime @map("hora_inicio") @db.Time(6)
+  duracionMin    Int      @map("duracion_min")
+  cupo           Int      @db.SmallInt
+  orden          Int      @default(0) @db.SmallInt
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  programacion RutaProgramacion @relation(fields: [programacionId], references: [id])
+  ejecuciones  RutaEjecucion[]
+
+  @@map("ruta_programacion_ventana")
+}
+
+model PlanificadorEstado {
+  id             Int       @id @db.SmallInt
+  habilitado     Boolean   @default(true)
+  ultimaPasada   DateTime? @map("ultima_pasada") @db.Timestamptz(6)
+  ultimaPasadaOk DateTime? @map("ultima_pasada_ok") @db.Timestamptz(6)
+  ultimoError    String?   @map("ultimo_error")
+  cambiadoPorId  String?   @map("cambiado_por") @db.Uuid
+  cambiadoEn     DateTime? @map("cambiado_en") @db.Timestamptz(6)
+  motivo         String?
+
+  @@map("planificador_estado")
+}
+
+model PlanificadorRegistro {
+  id        BigInt   @id @default(autoincrement())
+  inicio    DateTime @db.Timestamptz(6)
+  fin       DateTime @db.Timestamptz(6)
+  abiertas  Int      @default(0)
+  iniciadas Int      @default(0)
+  cerradas  Int      @default(0)
+  perdidas  Int      @default(0)
+  omitidas  Int      @default(0)
+  errores   Int      @default(0)
+  detalle   Json?
+
+  @@map("planificador_registro")
+}
+
+// F6 (0011): intento de asignación automática (a quién eligió y a quién descartó, y por qué).
+model AsignacionAutomaticaIntento {
+  id          BigInt   @id @default(autoincrement())
+  ejecucionId String   @map("ejecucion_id") @db.Uuid
+  intento     Int
+  ejecutadoEn DateTime @default(now()) @map("ejecutado_en") @db.Timestamptz(6)
+  asignados   Int      @default(0)
+  faltan      Int      @default(0)
+  candidatos  Int      @default(0)
+  radioM      Int?     @map("radio_m")
+  elegidos    Json     @default("[]")
+  excluidos   Json     @default("[]")
+  error       String?
+
+  ejecucion RutaEjecucion @relation(fields: [ejecucionId], references: [id])
+
+  @@map("asignacion_automatica_intento")
+}
+
+// F2 (0007): resultado de una operación por su clave idempotente.
+model OperacionIdempotente {
+  clave     String   @id @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  operacion String
+  huella    String
+  resultado Json
+  creadoEn  DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  @@map("operacion_idempotente")
 }
 
 model Patrulla {
@@ -331,6 +502,18 @@ model Patrulla {
   descripcion        String?
   poligonoGeojson    Json?           @map("poligono_geojson")
   turnoId            String?         @map("turno_id") @db.Uuid
+  // F2 (0007)
+  ejecucionId        String?         @map("ejecucion_id") @db.Uuid
+  modalidad          String?
+  motivoCierre       String?         @map("motivo_cierre")
+  estadoRuta         String?         @map("estado_ruta")
+  distanciaRutaM     Int?            @map("distancia_ruta_m")
+  estadoRutaEn       DateTime?       @map("estado_ruta_en") @db.Timestamptz(6)
+  incorporadaEn      DateTime?       @map("incorporada_en") @db.Timestamptz(6)
+  // F7 (0012): hora límite para incorporarse; vencida sin llegar → advertencia/alerta.
+  incorporacionLimite DateTime?      @map("incorporacion_limite") @db.Timestamptz(6)
+  // F4 (0009): hoja (subpunto o punto sin subpuntos) donde está el guardia.
+  puntoFijoId        String?         @map("punto_fijo_id") @db.Uuid
   iniciadaEn         DateTime?       @map("iniciada_en") @db.Timestamptz(6)
   completadaEn       DateTime?       @map("completada_en") @db.Timestamptz(6)
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -342,8 +525,65 @@ model Patrulla {
   asignadoPor   User          @relation("PatrullaAsignada", fields: [asignadoPorId], references: [id])
   turno         Turno?        @relation("PatrullaTurno", fields: [turnoId], references: [id])
   turnosTurno   Turno[]       @relation("TurnoPatrullaRef")
+  ejecucion     RutaEjecucion? @relation(fields: [ejecucionId], references: [id])
+  puntoFijo     PuntoFijo?     @relation(fields: [puntoFijoId], references: [id])
 
   @@map("patrulla")
+}
+
+// F4 (0009): catálogo de puntos fijos (un nivel de subpuntos).
+model PuntoFijo {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                 String   @unique
+  padreId                String?  @map("padre_id") @db.Uuid
+  nombre                 String
+  descripcion            String?
+  epiId                  String   @map("epi_id") @db.Uuid
+  epiMetodo              String   @default("ubicacion") @map("epi_metodo")
+  lat                    Float
+  lng                    Float
+  capacidad              Int      @db.SmallInt
+  orden                  Int      @default(0) @db.SmallInt
+  coordenadasAproximadas Boolean  @default(true) @map("coordenadas_aproximadas")
+  origen                 String   @default("manual")
+  activo                 Boolean  @default(true)
+  version                Int      @default(1)
+  creadoPorId            String?  @map("creado_por") @db.Uuid
+  actualizadoPorId       String?  @map("actualizado_por") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  padre       PuntoFijo?         @relation("PuntoFijoSubpuntos", fields: [padreId], references: [id])
+  subpuntos   PuntoFijo[]        @relation("PuntoFijoSubpuntos")
+  epi         Epi                @relation(fields: [epiId], references: [id])
+  versiones   PuntoFijoVersion[]
+  ejecuciones RutaEjecucion[]
+  patrullas   Patrulla[]
+
+  @@map("punto_fijo")
+}
+
+model PuntoFijoVersion {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  puntoFijoId   String   @map("punto_fijo_id") @db.Uuid
+  version       Int
+  cambio        String
+  nombre        String
+  epiId         String?  @map("epi_id") @db.Uuid
+  lat           Float
+  lng           Float
+  capacidad     Int      @db.SmallInt
+  activo        Boolean
+  politica      String?
+  afectados     Json?
+  motivo        String?
+  cambiadoPorId String?  @map("cambiado_por") @db.Uuid
+  cambiadoEn    DateTime @default(now()) @map("cambiado_en") @db.Timestamptz(6)
+
+  puntoFijo PuntoFijo @relation(fields: [puntoFijoId], references: [id])
+
+  @@unique([puntoFijoId, version])
+  @@map("punto_fijo_version")
 }
 
 // ------------------------------------------------------ 5. operación en campo
@@ -416,6 +656,12 @@ model Hecho {
   estadoCambiadoEn     DateTime?    @map("estado_cambiado_en") @db.Timestamptz(6)
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  // F3 (0008): EPI del hecho por SU ubicación. metodo: ubicacion | manual |
+  // legado; estado: asignada | ambigua | fuera_cobertura (pendiente de revisión).
+  epiMetodo            String?      @map("epi_metodo")
+  epiEstado            String?      @map("epi_estado")
+  epiTerritorioVersion Int?         @map("epi_territorio_version")
+  epiClasificadoEn     DateTime?    @map("epi_clasificado_en") @db.Timestamptz(6)
 
   turno             Turno?      @relation(fields: [turnoId], references: [id], onDelete: SetNull)
   guardia           Guardia     @relation(fields: [guardiaId], references: [id])
@@ -447,11 +693,42 @@ model Mandado {
   lat         Float
   lng         Float
   creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+  // F3 (0008): EPI del mandado por su ubicación (igual que hecho).
+  epiId                String?   @map("epi_id") @db.Uuid
+  epiMetodo            String?   @map("epi_metodo")
+  epiEstado            String?   @map("epi_estado")
+  epiTerritorioVersion Int?      @map("epi_territorio_version")
+  epiClasificadoEn     DateTime? @map("epi_clasificado_en") @db.Timestamptz(6)
 
   turno   Turno   @relation(fields: [turnoId], references: [id], onDelete: Cascade)
   guardia Guardia @relation(fields: [guardiaId], references: [id])
+  epi     Epi?    @relation(fields: [epiId], references: [id])
 
   @@map("mandado")
+}
+
+// F3 (0008): última posición válida del guardia y la EPI en la que está.
+// Una fila por guardia (no se escribe `guardia` en cada GPS). La EPI de la
+// cuenta del guardia (guardia.epi_id) queda como dato legado.
+model GuardiaUbicacionActual {
+  guardiaId         String   @id @map("guardia_id") @db.Uuid
+  telemetriaId      BigInt?  @map("telemetria_id")
+  lat               Float
+  lng               Float
+  precisionM        Decimal? @map("precision_m") @db.Decimal(8, 2)
+  bateriaPct        Int?     @map("bateria_pct")
+  capturadoEn       DateTime @map("capturado_en") @db.Timestamptz(6)
+  recibidoEn        DateTime @default(now()) @map("recibido_en") @db.Timestamptz(6)
+  epiId             String?  @map("epi_id") @db.Uuid
+  epiEstado         String   @map("epi_estado")
+  territorioVersion Int?     @map("territorio_version")
+  epiDesde          DateTime @default(now()) @map("epi_desde") @db.Timestamptz(6)
+  actualizadoEn     DateTime @default(now()) @map("actualizado_en") @db.Timestamptz(6)
+
+  guardia Guardia @relation(fields: [guardiaId], references: [id], onDelete: Cascade)
+  epi     Epi?    @relation(fields: [epiId], references: [id])
+
+  @@map("guardia_ubicacion_actual")
 }
 
 // Verificación periódica de ronda (selfie + GPS) durante el turno — NO es lo

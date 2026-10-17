@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate, Errors } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
-import { authenticate, type AuthRequest } from '@modules/auth/http/middlewares';
+import { authenticate, requireGuardia, type AuthRequest } from '@modules/auth/http/middlewares';
 import { ingestTelemetry } from './telemetry.service.js';
 
 const telemetrySchema = z.object({
@@ -18,10 +18,11 @@ const telemetrySchema = z.object({
   capturadoEn: z.coerce.date(),
 });
 
-// Endpoint del MÓVIL (guardia). Acepta cookie (web/dev) o Authorization: Bearer
-// (app). Para un token de guardia el `guardiaId` SIEMPRE sale del JWT: un
+// Endpoint del MÓVIL (guardia). El `guardiaId` SIEMPRE sale del JWT: un
 // guardia solo reporta su propia posición. El SOS es esta misma fila con
 // `esSos: true` (BD_UNIFICADA §2.2, se unificó api/sos.ts).
+// F3: antes un usuario WEB podía enviar GPS (y SOS) de cualquier
+// guardia pasando `guardiaId` en el body; ahora es exclusivo de la app.
 export function buildTelemetryRouter(tokens: TokenService): Router {
   const router = Router();
   router.use(authenticate(tokens));
@@ -71,11 +72,10 @@ export function buildTelemetryRouter(tokens: TokenService): Router {
 
   router.post(
     '/',
+    requireGuardia,
     asyncHandler(async (req: AuthRequest, res) => {
       const input = validate(telemetrySchema, req.body);
-      const guardiaId =
-        req.claims?.tipo === 'guardia' ? req.principal!.id : input.guardiaId;
-      if (!guardiaId) throw Errors.validation('Falta guardiaId.');
+      const guardiaId = req.principal!.id;
       const data = await ingestTelemetry({ ...input, guardiaId });
       res.status(201).json({ data });
     }),

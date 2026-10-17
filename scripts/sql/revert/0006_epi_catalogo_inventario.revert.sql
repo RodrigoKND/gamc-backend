@@ -1,4 +1,4 @@
--- Reversión de 0006_epi_catalogo_inventario (cambios/04 §2.4).
+-- Reversión de 0006_epi_catalogo_inventario.
 -- Restaura nombres y estado de las EPIs base, y elimina lo agregado.
 -- Las EPIs nuevas solo se borran si nada las referencia; si hay datos
 -- que ya las usan, la reversión se detiene para no perder información.

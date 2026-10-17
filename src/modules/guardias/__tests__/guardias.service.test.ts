@@ -2,17 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { setEstadoOperativo } from '../guardias.service.js';
 
 // El SOS real vive en guardia_telemetria (esSos/sosEstado), no en
-// guardia.estadoOperativo — este test blinda el fix de hoy: resolver el
-// estado operativo debe limpiar también el último ping en SOS, o el pin del
-// mapa y el KPI del Dashboard quedan "pegados" en SOS para siempre.
+// guardia.estadoOperativo. Resolver el estado operativo (endpoint de
+// compatibilidad) debe atender TODAS las alertas abiertas — antes solo la
+// última, y las anteriores quedaban pendientes — en la MISMA transacción que
+// el cambio de estado, y conservar es_sos = true como historial (F2).
 //
 // vi.mock() se hoistea sobre las declaraciones del archivo — vi.hoisted()
 // evita el ReferenceError de usar estos mocks dentro del factory de vi.mock.
 const {
   guardiaUpdate,
   guardiaFindUnique,
-  telemetriaFindFirst,
-  telemetriaUpdate,
+  telemetriaUpdateMany,
   turnoFindMany,
   hechoCount,
   turnoCount,
@@ -21,29 +21,38 @@ const {
 } = vi.hoisted(() => ({
   guardiaUpdate: vi.fn().mockResolvedValue({}),
   guardiaFindUnique: vi.fn(),
-  telemetriaFindFirst: vi.fn(),
-  telemetriaUpdate: vi.fn().mockResolvedValue({}),
+  telemetriaUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
   turnoFindMany: vi.fn().mockResolvedValue([]),
-  hechoCount: vi.fn().mockResolvedValue(0),
+  hechoCount: vi.fn().mockResolvedValue([]),
   turnoCount: vi.fn().mockResolvedValue(0),
   queryRaw: vi.fn().mockResolvedValue([]),
   auditLogCreate: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('@infra/database', () => ({
-  db: {
-    guardia: { update: guardiaUpdate, findUnique: guardiaFindUnique },
-    guardiaTelemetria: { findFirst: telemetriaFindFirst, update: telemetriaUpdate },
-    turno: { findMany: turnoFindMany, count: turnoCount },
-    hecho: { count: hechoCount },
-    auditLog: { create: auditLogCreate },
-    $queryRaw: queryRaw,
-  },
-}));
+vi.mock('@infra/database', () => {
+  const tx = {
+    guardia: { update: guardiaUpdate },
+    guardiaTelemetria: { updateMany: telemetriaUpdateMany },
+  };
+  return {
+    db: {
+      guardia: { update: guardiaUpdate, findUnique: guardiaFindUnique },
+      guardiaTelemetria: { updateMany: telemetriaUpdateMany },
+      turno: { findMany: turnoFindMany, count: turnoCount },
+      // F3: conteo de hechos por guardia (groupBy) y EPI actual del guardia.
+      hecho: { groupBy: hechoCount },
+      guardiaUbicacionActual: { findMany: vi.fn().mockResolvedValue([]) },
+      auditLog: { create: auditLogCreate },
+      $queryRaw: queryRaw,
+      $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
+    },
+  };
+});
 
 vi.mock('@infra/realtime', () => ({
-  EVENTS: { guardiaUbicacion: 'guardia:ubicacion', guardiaEstado: 'guardia:estado' },
+  EVENTS: { guardiaUbicacion: 'guardia:ubicacion', guardiaEstado: 'guardia:estado', sosNuevo: 'sos:nuevo' },
   publish: vi.fn(),
+  isRealtimeReady: () => false,
 }));
 
 const BASE_GUARDIA = {
@@ -66,53 +75,41 @@ const BASE_GUARDIA = {
   createdAt: new Date(),
 };
 
-describe('setEstadoOperativo — limpieza de SOS real', () => {
+describe('setEstadoOperativo — atención de SOS (compatibilidad)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     guardiaUpdate.mockResolvedValue({});
     guardiaFindUnique.mockResolvedValue(BASE_GUARDIA);
+    telemetriaUpdateMany.mockResolvedValue({ count: 2 });
     turnoFindMany.mockResolvedValue([]);
-    hechoCount.mockResolvedValue(0);
+    hechoCount.mockResolvedValue([]);
     turnoCount.mockResolvedValue(0);
     queryRaw.mockResolvedValue([]);
   });
 
-  it('marca sosEstado=atendido en el último ping SOS pendiente al volver a en_servicio', async () => {
-    telemetriaFindFirst.mockResolvedValue({ id: 42n, sosEstado: 'pendiente' });
-
+  it('al salir de emergencia atiende TODAS las alertas abiertas, conservando es_sos', async () => {
     await setEstadoOperativo('g-1', 'en_servicio', 'actor-1');
 
-    expect(telemetriaFindFirst).toHaveBeenCalledWith({
-      where: { guardiaId: 'g-1', esSos: true },
-      orderBy: { capturadoEn: 'desc' },
+    expect(guardiaUpdate).toHaveBeenCalledWith({ where: { id: 'g-1' }, data: { estadoOperativo: 'en_servicio' } });
+    expect(telemetriaUpdateMany).toHaveBeenCalledWith({
+      where: { guardiaId: 'g-1', esSos: true, OR: [{ sosEstado: null }, { sosEstado: 'pendiente' }] },
+      data: expect.objectContaining({ sosEstado: 'atendido', sosAtendidoPorId: 'actor-1' }),
     });
-    expect(telemetriaUpdate).toHaveBeenCalledWith({
-      where: { id: 42n },
-      data: expect.objectContaining({ esSos: false, sosEstado: 'atendido', sosAtendidoPorId: 'actor-1' }),
-    });
+    const data = telemetriaUpdateMany.mock.calls[0]![0].data;
+    expect(data).not.toHaveProperty('esSos');
   });
 
-  it('no vuelve a actualizar un ping que ya estaba atendido', async () => {
-    telemetriaFindFirst.mockResolvedValue({ id: 42n, sosEstado: 'atendido' });
+  it('solo actualiza alertas pendientes (las ya atendidas quedan fuera del filtro)', async () => {
+    await setEstadoOperativo('g-1', 'fuera_de_servicio', 'actor-1');
 
-    await setEstadoOperativo('g-1', 'en_servicio', 'actor-1');
-
-    expect(telemetriaUpdate).not.toHaveBeenCalled();
+    const where = telemetriaUpdateMany.mock.calls[0]![0].where;
+    expect(where.OR).toEqual([{ sosEstado: null }, { sosEstado: 'pendiente' }]);
   });
 
-  it('no toca guardia_telemetria si no hay ningún ping en SOS', async () => {
-    telemetriaFindFirst.mockResolvedValue(null);
-
-    await setEstadoOperativo('g-1', 'en_servicio', 'actor-1');
-
-    expect(telemetriaUpdate).not.toHaveBeenCalled();
-  });
-
-  it('no limpia el SOS si el nuevo estado es "emergencia" (activar SOS, no resolverlo)', async () => {
-
+  it('no atiende SOS si el nuevo estado es "emergencia" (activar SOS, no resolverlo)', async () => {
     await setEstadoOperativo('g-1', 'emergencia', 'actor-1');
 
-    expect(telemetriaFindFirst).not.toHaveBeenCalled();
-    expect(telemetriaUpdate).not.toHaveBeenCalled();
+    expect(guardiaUpdate).toHaveBeenCalled();
+    expect(telemetriaUpdateMany).not.toHaveBeenCalled();
   });
 });

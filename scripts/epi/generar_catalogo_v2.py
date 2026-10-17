@@ -11,7 +11,7 @@ inválido, si dos se solapan o si una sede/módulo queda fuera de su EPI.
 
 Los territorios son APROXIMADOS: celdas de Voronoi de sedes + módulos,
 recortadas a la envolvente de todas las unidades con un margen de ~1.3 km.
-No son límites oficiales (ver cambios/04 §2.4). Sustituye a
+No son límites oficiales. Sustituye a
 generar_poligonos.py (5 EPIs, con el casco viejo inventado como
 `centro_cercado`), que se conserva solo como referencia de la versión 1.
 """
@@ -124,12 +124,12 @@ def main():
     # ── SQL ───────────────────────────────────────────────────────────────
     L = []
     w = L.append
-    w('-- Catálogo EPI v2 (cambios/04 §2.4) — GENERADO por scripts/epi/generar_catalogo_v2.py')
+    w('-- Catálogo EPI v2 — GENERADO por scripts/epi/generar_catalogo_v2.py')
     w('-- a partir de scripts/epi/inventario_epis.json. No editar a mano: regenerar.')
     w('-- Reversión: scripts/sql/revert/0006_epi_catalogo_inventario.revert.sql')
     w('--')
-    w('-- Aditivo salvo las excepciones aprobadas X1 (desactivar centro_cercado) y')
-    w('-- X2 (nombres oficiales del inventario). Idempotente: se puede volver a')
+    w('-- Aditivo salvo las excepciones aprobadas: desactivar centro_cercado y')
+    w('-- nombres oficiales del inventario. Idempotente: se puede volver a')
     w('-- aplicar sin duplicar filas.')
     w('')
     w('-- 0) Precondiciones: aborta con mensaje si la BD no es la esperada.')
@@ -198,7 +198,7 @@ def main():
     for e in nuevas:
         w(f"INSERT INTO epi (codigo, nombre) VALUES ({sql_txt(e['codigo'])}, {sql_txt(e['nombre'])}) ON CONFLICT (codigo) DO NOTHING;")
     w('')
-    w('-- 5) Datos de sede + X2 (nombres oficiales; el código `sud` se conserva).')
+    w('-- 5) Datos de sede + nombres oficiales (el código `sud` se conserva).')
     for e in epis:
         lat, lng = coords(e['sede'])
         w(
@@ -212,7 +212,7 @@ def main():
     w('-- Centro Cercado: color histórico para pintar sus registros antiguos.')
     w("UPDATE epi SET color = '#0B1B3D' WHERE codigo = 'centro_cercado' AND color IS NULL;")
     w('')
-    w('-- 6) X1: Centro Cercado no figura en el inventario oficial → inactiva.')
+    w('-- 6) Centro Cercado no figura en el inventario oficial → inactiva.')
     w('--    Conserva su fila, su UUID y todas sus referencias históricas.')
     w("UPDATE epi SET activo = false WHERE codigo = 'centro_cercado';")
     w('')
@@ -262,7 +262,7 @@ def main():
     MIGRACION.write_text('\n'.join(L) + '\n', encoding='utf-8')
 
     R = [
-        '-- Reversión de 0006_epi_catalogo_inventario (cambios/04 §2.4).',
+        '-- Reversión de 0006_epi_catalogo_inventario.',
         '-- Restaura nombres y estado de las EPIs base, y elimina lo agregado.',
         '-- Las EPIs nuevas solo se borran si nada las referencia; si hay datos',
         '-- que ya las usan, la reversión se detiene para no perder información.',

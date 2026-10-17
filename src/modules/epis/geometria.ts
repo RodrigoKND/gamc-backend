@@ -1,13 +1,13 @@
 // Geometría territorial pura (sin BD) — GeoJSON en [lng, lat].
 //
-// Separa dos preguntas que antes usaban el mismo chequeo (cambios/04 §4.5):
+// Separa dos preguntas que antes usaban el mismo chequeo:
 //  · `puntoEnTerritorio`: ¿a qué EPI pertenece un punto? Sin tolerancia —
 //    clasificar un hecho o un GPS no debe "estirar" una EPI 60 m sobre la
 //    vecina.
 //  · `trazadoDentro`: ¿un recorrido queda dentro de la EPI? Revisa el
 //    trazado COMPLETO (cada segmento muestreado), no solo sus vértices: en
 //    una EPI cóncava dos vértices interiores pueden unir un tramo que sale
-//    del territorio (hallazgo H12). Aquí sí aplica una tolerancia de borde,
+//    del territorio. Aquí sí aplica una tolerancia de borde,
 //    porque el ruteo por calles (OSRM) roza los límites.
 
 type Ring = [number, number][];
@@ -53,6 +53,18 @@ function distanciaSegmentoM(p: [number, number], a: [number, number], b: [number
   const len2 = dx * dx + dy * dy;
   const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2));
   return Math.hypot(ax + t * dx, ay + t * dy);
+}
+
+/** Distancia (m) de un punto a una polilínea [lng, lat][] (o a un punto si tiene uno solo). */
+export function distanciaALineaM(p: [number, number], linea: [number, number][]): number {
+  if (linea.length === 0) return Infinity;
+  if (linea.length === 1) return distanciaSegmentoM(p, linea[0]!, linea[0]!);
+  let min = Infinity;
+  for (let i = 1; i < linea.length; i++) {
+    const d = distanciaSegmentoM(p, linea[i - 1]!, linea[i]!);
+    if (d < min) min = d;
+  }
+  return min;
 }
 
 export function distanciaABordeM(p: [number, number], poligonos: PolygonCoords[]): number {
