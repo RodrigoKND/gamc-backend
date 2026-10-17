@@ -1,10 +1,12 @@
-import type { Prisma, hecho_estado, nivel_riesgo } from '@prisma/client';
+import { Prisma, type hecho_estado, type nivel_riesgo } from '@prisma/client';
 import { db } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
-import { EVENTS, publish } from '@infra/realtime';
+import { EVENTS, publishTerritorial } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 import { peekAddress, reverseGeocode } from '@modules/mapas/geocoding.service.js';
+import { clasificarPunto, epiPorCodigo } from '@modules/epis/index';
+import { enAlcance, epiEfectiva, type Alcance } from '@modules/mapas/jurisdiccion';
 
 export interface HechoEvidenciaRow {
   id: string;
@@ -27,6 +29,10 @@ export interface HechoRow {
   epiId: string | null;
   epiCodigo: string | null;
   epiNombre: string | null;
+  /** F3: cómo se decidió la EPI (ubicacion | manual | legado). */
+  epiMetodo: string | null;
+  /** F3: asignada | ambigua | fuera_cobertura (las dos últimas: pendiente de revisión). */
+  epiEstado: string | null;
   guardiaNombre: string;
   guardiaId: string;
   evidencias: HechoEvidenciaRow[];
@@ -47,6 +53,8 @@ export interface HechoFiltros {
   desde?: string;
   hasta?: string;
   q?: string;
+  /** 'pendiente' = bandeja de supervisión: EPI ambigua o fuera de cobertura. */
+  clasificacion?: string;
 }
 
 // Un hecho sin `direccion` guardada (el celular no siempre la manda, ver
@@ -73,16 +81,24 @@ function toRow(row: Prisma.HechoGetPayload<{ include: typeof HECHO_INCLUDE }>, i
     evidencias: row.evidencias.map((e) => ({ id: e.id, url: e.url, tipo: e.tipo })),
     epiCodigo: row.epi?.codigo ?? null,
     epiNombre: row.epi?.nombre ?? null,
+    epiMetodo: row.epiMetodo ?? null,
+    epiEstado: row.epiEstado ?? null,
     guardiaNombre: includeGuardiaNombre ? nombreCompleto(row.guardia) : '',
     guardiaId: row.guardiaId,
   };
 }
 
-function buildHechoWhere(filtros: HechoFiltros): Prisma.HechoWhereInput {
+// Alcance (F3): el filtro del cliente solo REDUCE lo que el usuario puede
+// ver; nunca lo amplía. Listado, total, exportación y agregados
+// usan este mismo where.
+function buildHechoWhere(filtros: HechoFiltros, alcance: Alcance): Prisma.HechoWhereInput | null {
   const where: Prisma.HechoWhereInput = {};
+  const epi = epiEfectiva(alcance, filtros.epiId);
+  if (epi === null) return null;
+  if (epi) where.epiId = epi;
+  if (filtros.clasificacion === 'pendiente') where.epiEstado = { in: ['ambigua', 'fuera_cobertura'] };
   if (filtros.tipo) where.tipoHecho = { codigo: filtros.tipo };
   if (filtros.estado) where.estado = filtros.estado as hecho_estado;
-  if (filtros.epiId) where.epiId = filtros.epiId;
   if (filtros.nivelRiesgo) where.nivelRiesgo = filtros.nivelRiesgo as nivel_riesgo;
   if (filtros.desde || filtros.hasta) {
     where.ocurridoEn = {};
@@ -115,13 +131,18 @@ function buildHechoWhere(filtros: HechoFiltros): Prisma.HechoWhereInput {
   return where;
 }
 
-export async function listHechos(filtros: HechoFiltros & { limit?: number; offset?: number } = {}): Promise<HechoRow[]> {
-  const where = buildHechoWhere(filtros);
+// Orden estable: con empates de fecha el id desempata, así las páginas no
+// repiten ni pierden filas.
+const ORDEN_HECHOS: Prisma.HechoOrderByWithRelationInput[] = [{ ocurridoEn: 'desc' }, { id: 'desc' }];
+
+export async function listHechos(alcance: Alcance, filtros: HechoFiltros & { limit?: number; offset?: number } = {}): Promise<HechoRow[]> {
+  const where = buildHechoWhere(filtros, alcance);
+  if (!where) return [];
   const take = Math.min(Math.max(filtros.limit ?? 200, 1), 500);
   const skip = Math.max(filtros.offset ?? 0, 0);
   const rows = await db.hecho.findMany({
     where,
-    orderBy: { ocurridoEn: 'desc' },
+    orderBy: ORDEN_HECHOS,
     take,
     skip,
     include: HECHO_INCLUDE,
@@ -132,8 +153,36 @@ export async function listHechos(filtros: HechoFiltros & { limit?: number; offse
 // Total real (sin `take`) para pintar controles de página — listHechos
 // solo/siempre devolvía como máximo `limit` filas (200 por defecto) sin
 // forma de saber cuántas había en total detrás de ese corte.
-export async function countHechos(filtros: HechoFiltros = {}): Promise<number> {
-  return db.hecho.count({ where: buildHechoWhere(filtros) });
+export async function countHechos(alcance: Alcance, filtros: HechoFiltros = {}): Promise<number> {
+  const where = buildHechoWhere(filtros, alcance);
+  return where ? db.hecho.count({ where }) : 0;
+}
+
+export const EXPORTACION_MAX = 20_000;
+
+/**
+ * Exportación COMPLETA: todas las filas que cumplen los filtros, dentro
+ * del alcance, en orden estable. Antes la web pedía una sola página "grande"
+ * (el backend la recortaba a 100/200 filas) y la llamaba exportación. Si se
+ * supera el tope, se avisa con `truncado` en vez de cortar en silencio.
+ */
+export async function exportarHechos(alcance: Alcance, filtros: HechoFiltros = {}): Promise<{ rows: HechoRow[]; total: number; truncado: boolean }> {
+  const where = buildHechoWhere(filtros, alcance);
+  if (!where) return { rows: [], total: 0, truncado: false };
+  return db.$transaction(
+    async (tx) => {
+      // Misma foto de datos para el total y las filas (REPEATABLE READ).
+      const total = await tx.hecho.count({ where });
+      const rows: HechoRow[] = [];
+      const LOTE = 1_000;
+      for (let skip = 0; skip < Math.min(total, EXPORTACION_MAX); skip += LOTE) {
+        const lote = await tx.hecho.findMany({ where, orderBy: ORDEN_HECHOS, skip, take: Math.min(LOTE, EXPORTACION_MAX - skip), include: HECHO_INCLUDE });
+        rows.push(...lote.map((row) => toRow(row as any)));
+      }
+      return { rows, total, truncado: total > EXPORTACION_MAX };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 60_000 },
+  );
 }
 
 export async function listTiposHecho() {
@@ -164,14 +213,16 @@ export interface HechoMovilRow extends HechoRow {
 }
 
 // Alta de hecho desde el MÓVIL (BD_UNIFICADA §5.3). El `guardiaId` sale del
-// JWT; `epi_id` se toma de la jurisdicción del guardia (el punto-en-polígono
-// real queda pendiente de PostGIS, ver nota del doc).
+// JWT. F3: la EPI del hecho sale de SUS coordenadas, no de la cuenta
+// del guardia ni de su última posición. Fuera de todas las EPIs o en un
+// solapamiento queda pendiente de revisión (bandeja de supervisión).
 export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<HechoMovilRow> {
   const guardia = await db.guardia.findUnique({
     where: { id: input.guardiaId },
-    select: { epiId: true },
+    select: { id: true },
   });
   if (!guardia) throw Errors.notFound('Guardia no encontrado.');
+  const clasif = await clasificarPunto([input.lng, input.lat]);
 
   let tipoHechoId = input.tipoHechoId ?? null;
   if (!tipoHechoId) {
@@ -230,7 +281,11 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
       nivelRiesgo: input.nivelRiesgo,
       lat: input.lat,
       lng: input.lng,
-      epiId: guardia.epiId,
+      epiId: clasif.epiId,
+      epiMetodo: 'ubicacion',
+      epiEstado: clasif.estado,
+      epiTerritorioVersion: clasif.version,
+      epiClasificadoEn: new Date(),
       direccion,
       ocurridoEn: input.ocurridoEn ?? new Date(),
       estado: 'reportado',
@@ -258,7 +313,7 @@ export async function crearHechoMovil(input: CrearHechoMovilInput): Promise<Hech
     recursoId: created.id,
   });
   const base = toRow(created);
-  publish(EVENTS.hechoActualizado, base);
+  publishTerritorial(EVENTS.hechoActualizado, created.epiId, base);
   return { ...base, turnoId: created.turnoId };
 }
 
@@ -272,21 +327,55 @@ export async function listHechosDeGuardia(guardiaId: string): Promise<HechoRow[]
   return rows.map((row) => toRow(row as any));
 }
 
-export async function changeHechoEstado(id: string, estado: hecho_estado, actorId: string): Promise<HechoRow> {
-  try {
-    await db.hecho.update({
-      where: { id },
-      data: { estado, estadoCambiadoPorId: actorId, estadoCambiadoEn: new Date() },
-    });
-  } catch {
-    throw Errors.notFound('Hecho no encontrado.');
-  }
-  const row = await db.hecho.findUnique({
+/** Un hecho fuera del alcance responde 404, igual que uno inexistente (no se revela que existe). */
+async function hechoEnAlcance(id: string, alcance: Alcance) {
+  const h = await db.hecho.findUnique({ where: { id }, select: { id: true, epiId: true } });
+  if (!h || !enAlcance(alcance, h.epiId)) throw Errors.notFound('Hecho no encontrado.');
+  return h;
+}
+
+export async function getHecho(id: string, alcance: Alcance): Promise<HechoRow> {
+  await hechoEnAlcance(id, alcance);
+  const row = await db.hecho.findUniqueOrThrow({ where: { id }, include: HECHO_INCLUDE });
+  return toRow(row as any);
+}
+
+export async function changeHechoEstado(id: string, estado: hecho_estado, actorId: string, alcance: Alcance): Promise<HechoRow> {
+  await hechoEnAlcance(id, alcance);
+  await db.hecho.update({
     where: { id },
+    data: { estado, estadoCambiadoPorId: actorId, estadoCambiadoEn: new Date() },
+  });
+  const row = await db.hecho.findUniqueOrThrow({ where: { id }, include: HECHO_INCLUDE });
+  await logAudit({ actorUserId: actorId, accion: `hecho_${estado}`, recurso: 'hechos', recursoId: id });
+  publishTerritorial(EVENTS.hechoActualizado, row.epiId, toRow(row as any));
+  return toRow(row as any);
+}
+
+/**
+ * Bandeja de supervisión (F3): el Super Admin decide la EPI de un hecho
+ * ambiguo o fuera de cobertura (o corrige uno). Queda como método 'manual' y
+ * el valor anterior en la auditoría.
+ */
+export async function clasificarHechoManual(id: string, epiCodigo: string, actorId: string): Promise<HechoRow> {
+  const epi = await epiPorCodigo(epiCodigo);
+  if (!epi?.operativa) throw Errors.validation('La EPI indicada no existe o no está operativa.');
+  const antes = await db.hecho.findUnique({ where: { id }, select: { epiId: true, epiEstado: true, epiMetodo: true } });
+  if (!antes) throw Errors.notFound('Hecho no encontrado.');
+  const row = await db.hecho.update({
+    where: { id },
+    data: { epiId: epi.id, epiMetodo: 'manual', epiEstado: 'asignada', epiTerritorioVersion: epi.territorio?.version ?? null, epiClasificadoEn: new Date() },
     include: HECHO_INCLUDE,
   });
-  if (!row) throw Errors.notFound('Hecho no encontrado.');
-  await logAudit({ actorUserId: actorId, accion: `hecho_${estado}`, recurso: 'hechos', recursoId: id });
-  publish(EVENTS.hechoActualizado, toRow(row as any));
-  return toRow(row as any);
+  await logAudit({
+    actorUserId: actorId,
+    accion: 'clasificar_hecho',
+    recurso: 'hechos',
+    recursoId: id,
+    detalle: { antes, despues: { epiId: epi.id, epiCodigo: epi.codigo } },
+  });
+  const dto = toRow(row as any);
+  publishTerritorial(EVENTS.hechoActualizado, antes.epiId, dto);
+  if (antes.epiId !== epi.id) publishTerritorial(EVENTS.hechoActualizado, epi.id, dto);
+  return dto;
 }

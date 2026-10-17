@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate, authorize, requireGuardia, type AuthRequest } from '@modules/auth/http/middlewares';
+import { alcanceDe } from '@modules/mapas/jurisdiccion';
 import { crearMandado, listMandadosDeGuardia, listMandadosRecientes } from './mandados.service.js';
 
 const crearSchema = z.object({
@@ -24,17 +25,14 @@ export function buildMandadosRouter(tokens: TokenService): Router {
     authorize('hechos', 'ver'),
     asyncHandler(async (req: AuthRequest, res) => {
       const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 50;
-      const desde = typeof req.query.desde === 'string' ? req.query.desde : undefined;
-      const guardiaId = typeof req.query.guardiaId === 'string' ? req.query.guardiaId : undefined;
-      // Si piden filtro por guardia/desde, delegar a servicio específico sería ideal — por ahora lista reciente
-      const mandados = await listMandadosRecientes(Number.isFinite(limit) ? limit : 50);
-      let filtered = mandados;
-      if (guardiaId) filtered = filtered.filter((m) => m.guardiaId === guardiaId);
-      if (desde) {
-        const desdeDate = new Date(desde);
-        if (!isNaN(desdeDate.getTime())) filtered = filtered.filter((m) => new Date(m.creadoEn) >= desdeDate);
-      }
-      res.json({ data: filtered });
+      const desde = typeof req.query.desde === 'string' ? new Date(req.query.desde) : undefined;
+      const guardiaId = typeof req.query.guardiaId === 'string' && /^[0-9a-f-]{36}$/i.test(req.query.guardiaId) ? req.query.guardiaId : undefined;
+      const mandados = await listMandadosRecientes(await alcanceDe(req.principal!), {
+        limit: Number.isFinite(limit) ? limit : 50,
+        guardiaId,
+        desde: desde && !isNaN(desde.getTime()) ? desde : undefined,
+      });
+      res.json({ data: mandados });
     }),
   );
 

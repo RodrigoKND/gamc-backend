@@ -1,9 +1,9 @@
--- Catálogo EPI v2 (cambios/04 §2.4) — GENERADO por scripts/epi/generar_catalogo_v2.py
+-- Catálogo EPI v2 — GENERADO por scripts/epi/generar_catalogo_v2.py
 -- a partir de scripts/epi/inventario_epis.json. No editar a mano: regenerar.
 -- Reversión: scripts/sql/revert/0006_epi_catalogo_inventario.revert.sql
 --
--- Aditivo salvo las excepciones aprobadas X1 (desactivar centro_cercado) y
--- X2 (nombres oficiales del inventario). Idempotente: se puede volver a
+-- Aditivo salvo las excepciones aprobadas: desactivar centro_cercado y
+-- nombres oficiales del inventario. Idempotente: se puede volver a
 -- aplicar sin duplicar filas.
 
 -- 0) Precondiciones: aborta con mensaje si la BD no es la esperada.
@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS ix_modulo_policial_epi ON modulo_policial (epi_id);
 INSERT INTO epi (codigo, nombre) VALUES ('jaihuayco', 'EPI Jaihuayco') ON CONFLICT (codigo) DO NOTHING;
 INSERT INTO epi (codigo, nombre) VALUES ('alalay_sud', 'EPI Alalay Sud') ON CONFLICT (codigo) DO NOTHING;
 
--- 5) Datos de sede + X2 (nombres oficiales; el código `sud` se conserva).
+-- 5) Datos de sede + nombres oficiales (el código `sud` se conserva).
 UPDATE epi SET numero = 1, nombre = 'EPI Sur', nombre_oficial = 'Estación Policial Integral N° 1 "Sur"', color = '#F5A623', sede_lat = -17.444305, sede_lng = -66.165342, sede_direccion = 'Avenida Panamericana, frente a la Iglesia San Marcos', telefonos = '[{"tipo": "whatsapp", "numero": "57710101"}]'::jsonb, activo = true WHERE codigo = 'sud';
 UPDATE epi SET numero = 2, nombre = 'EPI Norte', nombre_oficial = 'Estación Policial Integral N° 2 "Norte"', color = '#5DADE2', sede_lat = -17.361659, sede_lng = -66.172665, sede_direccion = 'Av. Melchor Pérez de Olguín y Calle Franklin D. Roosevelt', telefonos = '[{"tipo": "fijo", "numero": "44444151"}, {"tipo": "fijo", "numero": "44444155"}, {"tipo": "whatsapp", "numero": "67522654"}]'::jsonb, activo = true WHERE codigo = 'norte';
 UPDATE epi SET numero = 3, nombre = 'EPI Jaihuayco', nombre_oficial = 'Estación Policial Integral N° 3 "Jaihuayco"', color = '#E57399', sede_lat = -17.4269086, sede_lng = -66.161143, sede_direccion = 'Calle Manuel Virreira y Calle Lizandro e/ C. Daniel Arauco', telefonos = '[{"tipo": "fijo", "numero": "4444177"}]'::jsonb, activo = true WHERE codigo = 'jaihuayco';
@@ -81,7 +81,7 @@ UPDATE epi SET numero = 6, nombre = 'EPI Central', nombre_oficial = 'Estación P
 -- Centro Cercado: color histórico para pintar sus registros antiguos.
 UPDATE epi SET color = '#0B1B3D' WHERE codigo = 'centro_cercado' AND color IS NULL;
 
--- 6) X1: Centro Cercado no figura en el inventario oficial → inactiva.
+-- 6) Centro Cercado no figura en el inventario oficial → inactiva.
 --    Conserva su fila, su UUID y todas sus referencias históricas.
 UPDATE epi SET activo = false WHERE codigo = 'centro_cercado';
 

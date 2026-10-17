@@ -6,6 +6,28 @@ import { PasswordService } from '@modules/auth/application/password.service';
 import { EVENTS, publish } from '@infra/realtime';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 import { peekAddress } from '@modules/mapas/geocoding.service.js';
+import { atenderTodasLasAlertas } from './sos.service.js';
+import { epiDeAlcance, type Alcance } from '@modules/mapas/jurisdiccion';
+
+/** Edad máxima (min) de la última posición para considerar "reciente" la EPI actual. */
+export const EPI_ACTUAL_RECIENTE_MIN = 10;
+
+/**
+ * EPI en la que está el guardia AHORA (F3), por su última posición
+ * válida. `frescura`: reciente (≤ 10 min) | antigua | sin_dato. La EPI de
+ * la cuenta (epiId/epiCodigo) queda como dato legado.
+ */
+export interface EpiActual {
+  epiId: string | null;
+  epiCodigo: string | null;
+  epiNombre: string | null;
+  /** asignada | ambigua | fuera_cobertura */
+  estado: string;
+  capturadoEn: Date;
+  /** Desde cuándo está en esta EPI. */
+  desde: Date;
+  frescura: 'reciente' | 'antigua';
+}
 
 export type EstadoOperativo = 'fuera_de_servicio' | 'en_servicio' | 'emergencia';
 export type EstadoCuentaGuardia = 'pendiente_activacion' | 'activo' | 'inactivo' | 'suspendido';
@@ -44,6 +66,10 @@ export interface GuardiaRow {
   ubicacion: GuardiaUbicacion | null;
   turnoActivo: boolean;
   turnoInicio: Date | null;
+  /** F3: null = el guardia nunca reportó GPS (EPI actual desconocida). */
+  epiActual: EpiActual | null;
+  /** F3: hechos reportados por el guardia DENTRO del alcance de quien consulta. */
+  hechosCount: number;
 }
 
 interface LastPoint {
@@ -83,6 +109,41 @@ async function ultimaPosicion(guardiaIds: string[]): Promise<Map<string, Guardia
   return map;
 }
 
+async function episActuales(guardiaIds: string[]): Promise<Map<string, EpiActual>> {
+  if (guardiaIds.length === 0) return new Map();
+  const rows = await db.guardiaUbicacionActual.findMany({
+    where: { guardiaId: { in: guardiaIds } },
+    include: { epi: { select: { codigo: true, nombre: true } } },
+  });
+  const limite = Date.now() - EPI_ACTUAL_RECIENTE_MIN * 60_000;
+  return new Map(
+    rows.map((r) => [
+      r.guardiaId,
+      {
+        epiId: r.epiId,
+        epiCodigo: r.epi?.codigo ?? null,
+        epiNombre: r.epi?.nombre ?? null,
+        estado: r.epiEstado,
+        capturadoEn: r.capturadoEn,
+        desde: r.epiDesde,
+        frescura: r.capturadoEn.getTime() >= limite ? 'reciente' : 'antigua',
+      },
+    ]),
+  );
+}
+
+/** Hechos por guardia dentro del alcance (antes la web los contaba sobre una página de 200). */
+async function hechosPorGuardia(guardiaIds: string[], alcance: Alcance | null): Promise<Map<string, number>> {
+  if (guardiaIds.length === 0) return new Map();
+  const epi = alcance ? epiDeAlcance(alcance) : undefined;
+  const rows = await db.hecho.groupBy({
+    by: ['guardiaId'],
+    where: { guardiaId: { in: guardiaIds }, ...(epi ? { epiId: epi } : {}) },
+    _count: { id: true },
+  });
+  return new Map(rows.map((r) => [r.guardiaId, r._count.id]));
+}
+
 async function turnosActivos(): Promise<Map<string, Date>> {
   const rows = await db.turno.findMany({
     where: { estado: 'en_servicio' },
@@ -91,9 +152,13 @@ async function turnosActivos(): Promise<Map<string, Date>> {
   return new Map(rows.map((r) => [r.guardiaId, r.horainicio]));
 }
 
+// La lista de guardias es GLOBAL para todos los roles web (F3): un
+// operador puede elegir personal de cualquier ubicación. Lo territorial (el
+// conteo de hechos) sí respeta el alcance de quien consulta.
 export async function listGuardias(
   includeUbicacion = true,
-  filtros: { q?: string; epiCodigo?: string; estado?: string; estadoOperativo?: string; excluirInactivos?: boolean; page?: number; pageSize?: number } = {},
+  filtros: { q?: string; epiCodigo?: string; epiActual?: string; estado?: string; estadoOperativo?: string; excluirInactivos?: boolean; page?: number; pageSize?: number } = {},
+  alcance: Alcance | null = null,
 ): Promise<{ rows: GuardiaRow[]; total: number }> {
   const where: any = {};
   if (filtros.epiCodigo) {
@@ -102,6 +167,15 @@ export async function listGuardias(
     const epi = await db.epi.findUnique({ where: { codigo: filtros.epiCodigo }, select: { id: true } });
     if (!epi) return { rows: [], total: 0 };
     where.epiId = epi.id;
+  }
+  // Filtro por EPI ACTUAL (donde está hoy): código de EPI, o 'sin_dato'
+  // (nunca reportó GPS) / 'fuera_cobertura'.
+  if (filtros.epiActual === 'sin_dato') where.ubicacionActual = { is: null };
+  else if (filtros.epiActual === 'fuera_cobertura') where.ubicacionActual = { is: { epiId: null } };
+  else if (filtros.epiActual) {
+    const epi = await db.epi.findUnique({ where: { codigo: filtros.epiActual }, select: { id: true } });
+    if (!epi) return { rows: [], total: 0 };
+    where.ubicacionActual = { is: { epiId: epi.id } };
   }
   if (filtros.estado) where.estado = filtros.estado;
   // La tabla principal de /guardias esconde a los dados de baja (cuenta
@@ -149,7 +223,12 @@ export async function listGuardias(
   ]);
 
   const ids = guardias.map((g) => g.id);
-  const [posiciones, activos] = await Promise.all([ultimaPosicion(ids), turnosActivos()]);
+  const [posiciones, activos, actuales, conteos] = await Promise.all([
+    ultimaPosicion(ids),
+    turnosActivos(),
+    episActuales(ids),
+    hechosPorGuardia(ids, alcance),
+  ]);
 
   const rows = guardias.map((g) => ({
     id: g.id,
@@ -174,19 +253,23 @@ export async function listGuardias(
     ubicacion: includeUbicacion ? (posiciones.get(g.id) ?? null) : null,
     turnoActivo: activos.has(g.id),
     turnoInicio: activos.get(g.id) ?? null,
+    epiActual: actuales.get(g.id) ?? null,
+    hechosCount: conteos.get(g.id) ?? 0,
   }));
   return { rows, total };
 }
 
-export async function getGuardia(id: string): Promise<GuardiaRow & { hechosCount: number; turnosCount: number } | null> {
+export async function getGuardia(id: string, alcance: Alcance | null = null): Promise<GuardiaRow & { turnosCount: number } | null> {
   const g = await db.guardia.findUnique({ where: { id }, include: { epi: { select: { codigo: true, nombre: true } } } });
   if (!g) return null;
   const posiciones = await ultimaPosicion([g.id]);
-  const [activos, hechosCount, turnosCount] = await Promise.all([
+  const [activos, conteos, turnosCount, actuales] = await Promise.all([
     turnosActivos(),
-    db.hecho.count({ where: { guardiaId: g.id } }),
+    hechosPorGuardia([g.id], alcance),
     db.turno.count({ where: { guardiaId: g.id } }),
+    episActuales([g.id]),
   ]);
+  const hechosCount = conteos.get(g.id) ?? 0;
   return {
     id: g.id,
     primerNombre: g.primerNombre,
@@ -210,6 +293,7 @@ export async function getGuardia(id: string): Promise<GuardiaRow & { hechosCount
     ubicacion: posiciones.get(g.id) ?? null,
     turnoActivo: activos.has(g.id),
     turnoInicio: activos.get(g.id) ?? null,
+    epiActual: actuales.get(g.id) ?? null,
     hechosCount,
     turnosCount,
   };
@@ -268,28 +352,18 @@ export async function setEstadoCuenta(id: string, estado: EstadoCuentaGuardia, a
 export async function setEstadoOperativo(id: string, estadoOperativo: EstadoOperativo, actorId: string): Promise<GuardiaRow> {
   const prev = await db.guardia.findUnique({ where: { id }, select: { estadoOperativo: true } });
   if (!prev) throw Errors.notFound('Guardía no encontrado.');
+  // Compatibilidad: salir de 'emergencia' por este endpoint atiende TODAS las
+  // alertas abiertas (antes solo la última, y otras quedaban pendientes). La
+  // atención normal es POST /guardias/:id/sos/atender (sos.service.ts), que
+  // atiende exactamente las alertas vistas y deriva el estado del turno real.
+  // El registro conserva es_sos = true y pasa a 'atendido' (historial).
   try {
-    await db.guardia.update({ where: { id }, data: { estadoOperativo } });
+    await db.$transaction(async (tx) => {
+      await tx.guardia.update({ where: { id }, data: { estadoOperativo } });
+      if (estadoOperativo !== 'emergencia') await atenderTodasLasAlertas(tx, id, actorId);
+    });
   } catch {
     throw Errors.notFound('Guardía no encontrado.');
-  }
-  // El SOS real vive en la última fila de guardia_telemetria (esSos/sosEstado),
-  // no en guardia.estadoOperativo — pueden desincronizarse (ver reporte
-  // 2026-09-13 §2.1), así que esto NO se condiciona a que `prev` haya sido
-  // 'emergencia': se limpia cualquier ping SOS pendiente cada vez que el
-  // nuevo estado no es 'emergencia', sin importar de dónde venía. Blindado
-  // por test (guardias.service.test.ts).
-  if (estadoOperativo !== 'emergencia') {
-    const lastSos = await db.guardiaTelemetria.findFirst({
-      where: { guardiaId: id, esSos: true },
-      orderBy: { capturadoEn: 'desc' },
-    });
-    if (lastSos && lastSos.sosEstado !== 'atendido') {
-      await db.guardiaTelemetria.update({
-        where: { id: lastSos.id },
-        data: { esSos: false, sosEstado: 'atendido', sosAtendidoPorId: actorId, sosAtendidoEn: new Date() },
-      });
-    }
   }
   const guardia = await getGuardia(id);
   if (!guardia) throw Errors.notFound('Guardía no encontrado.');

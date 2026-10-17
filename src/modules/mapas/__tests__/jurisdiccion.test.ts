@@ -58,7 +58,7 @@ describe('jurisdicción por EPI', () => {
     expect(() => exigirDentroDeEpi(JURISDICCION, null)).toThrow(/no contiene coordenadas/i);
   });
 
-  // H12 (cambios/02): antes solo se revisaban los VÉRTICES. En una EPI en
+  // antes solo se revisaban los VÉRTICES. En una EPI en
   // forma de U, un tramo entre dos vértices interiores cruzaba el hueco
   // exterior y el backend lo aceptaba.
   describe('contención del trazado completo', () => {
