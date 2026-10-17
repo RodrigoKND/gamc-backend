@@ -1,14 +1,23 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
-import { AppError, asyncHandler, validate } from '@shared/index';
+import { AppError, Errors, asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';
 import { authenticate, authorize, type AuthRequest } from '@modules/auth/http/middlewares';
-import { recorridoQuery } from '@modules/turnos/turnos.service';
+import { recortarRecorrido, recorridoQuery, ventanasAutorizadas } from '@modules/turnos/turnos.service';
+import { MODALIDADES, TIPOS_RUTA } from '@modules/ejecuciones/config';
 import {
-  asignarPatrulla,
-  cancelarPatrulla,
-  cancelarRuta,
+  asignarEjecucion,
+  cancelarEjecucion,
+  previsualizarAsignacion,
+  retirarGuardia,
+  type Actor,
+  type AsignarInput,
+} from '@modules/ejecuciones/ejecuciones.service';
+import { intentarAhora } from '@modules/programacion/automatica';
+import { db } from '@infra/database';
+import {
+  actualizarRutaPlantilla,
+  archivarRutaPlantilla,
   crearRutaPlantilla,
   geocodificarPuntos,
   heatmap,
@@ -18,15 +27,47 @@ import {
   ubicacionesActuales,
   zonasCriticas,
 } from './mapas.service.js';
-import { episConPoligono, jurisdiccionDe } from './jurisdiccion.js';
+import { alcanceDe, alcanceOVacio, episConPoligono, jurisdiccionDe } from './jurisdiccion.js';
 
-const asignarSchema = z.object({
+const lngLat = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
+
+// Motor de asignación (F2): una sola intención por operación.
+const asignacionSchema = z.object({
+    claveIdempotencia: z.string().uuid(),
+    ejecucionId: z.string().uuid().optional(),
+    rutaPlantillaId: z.string().uuid().optional(),
+    // F4: asignar a un punto fijo del catálogo (punto o subpunto).
+    puntoFijoId: z.string().uuid().optional(),
+    nueva: z
+      .object({
+        nombre: z.string().trim().min(1).max(120),
+        descripcion: z.string().trim().max(500).optional().nullable(),
+        trazado: z.array(lngLat).min(2).max(2000),
+        tipo: z.enum(TIPOS_RUTA),
+      })
+      .optional(),
+    modalidad: z.enum(MODALIDADES).optional(),
+    nombre: z.string().trim().max(120).optional().nullable(),
+    descripcion: z.string().trim().max(500).optional().nullable(),
+    unidad: z.string().trim().max(60).optional().nullable(),
+    guardias: z
+      .array(z.object({ guardiaId: z.string().uuid(), punto: lngLat.optional().nullable(), puntoFijoId: z.string().uuid().optional().nullable() }))
+      .min(1)
+      .max(50),
+    confirmaciones: z.array(z.object({ guardiaId: z.string().uuid(), patrullaId: z.string().uuid() })).max(50).optional(),
+  });
+
+// Compatibilidad: endpoint individual anterior. Delega al MISMO motor (con
+// capacidad, elegibilidad y confirmación de reasignación); ya no reemplaza en
+// silencio la ruta anterior del guardia.
+const asignarLegadoSchema = z.object({
   guardiaId: z.string().uuid(),
-  rutaPlantillaId: z.string().uuid().optional().nullable(),
-  epiId: z.string().uuid().optional().nullable(),
+  rutaPlantillaId: z.string().uuid(),
   nombre: z.string().trim().max(120).optional().nullable(),
   descripcion: z.string().trim().max(500).optional().nullable(),
-  poligonoGeojson: z.unknown().optional().nullable(),
+  poligonoGeojson: z.object({ type: z.literal('Point'), coordinates: lngLat }).optional().nullable(),
+  confirmarPatrullaId: z.string().uuid().optional(),
+  claveIdempotencia: z.string().uuid().optional(),
 });
 
 // [lng, lat] pelado (no envuelto en GeoJSON) — ver comentario en
@@ -41,14 +82,58 @@ const geocodificarSchema = z.object({
   puntos: z.array(z.object({ lat: z.number(), lng: z.number() })).min(1).max(6),
 });
 
+// Previsualización: solo hacen falta los guardias (se pide ANTES de dibujar
+// la ruta). Las demás claves que mande la web se ignoran.
+const previsualizarSchema = z.object({
+  ejecucionId: z.string().uuid().optional(),
+  puntoFijoId: z.string().uuid().optional(),
+  guardias: z.array(z.object({ guardiaId: z.string().uuid() })).min(1).max(50),
+});
+
+// Biblioteca: crea una ruta predeterminada (establecida) o guardada sin
+// asignarla a nadie. Sus parámetros aplican a cada asignación futura.
 const crearRutaSchema = z.object({
   nombre: z.string().trim().min(1).max(120),
   descripcion: z.string().trim().max(500).optional().nullable(),
   epiId: z.string().uuid().optional().nullable(),
-  trazado: z.array(z.tuple([z.number(), z.number()])).min(2).max(2000),
+  trazado: z.array(lngLat).min(2).max(2000),
   activo: z.boolean().optional(),
-  modalidad: z.enum(['coche', 'moto', 'a_pie', 'punto_fijo', 'oficina']).optional().nullable(),
+  modalidad: z.enum(MODALIDADES).optional().nullable(),
+  tipo: z.enum(['establecida', 'guardada']).optional(),
 });
+
+const actualizarRutaSchema = z.object({
+  nombre: z.string().trim().min(1).max(120).optional(),
+  descripcion: z.string().trim().max(500).optional().nullable(),
+  tipo: z.enum(['establecida', 'guardada']).optional(),
+  modalidad: z.enum(MODALIDADES).optional().nullable(),
+});
+
+function actorDe(req: AuthRequest): Actor {
+  const p = req.principal!;
+  return { id: p.id, role: p.role, permissions: p.permissions as Actor['permissions'] };
+}
+
+function aInput(req: AuthRequest, body: z.infer<typeof asignacionSchema>, jurisdiccion: Awaited<ReturnType<typeof jurisdiccionDe>>): AsignarInput {
+  const origenes = [body.rutaPlantillaId, body.nueva, body.puntoFijoId].filter(Boolean).length;
+  if (!body.ejecucionId && origenes !== 1) {
+    throw Errors.validation('Indica UNA ruta guardada (rutaPlantillaId), un trazado nuevo (nueva) o un punto fijo (puntoFijoId).');
+  }
+  return {
+    actor: actorDe(req),
+    jurisdiccion,
+    claveIdempotencia: body.claveIdempotencia,
+    ejecucionId: body.ejecucionId,
+    puntoFijoId: body.puntoFijoId,
+    ruta: body.rutaPlantillaId ? { rutaPlantillaId: body.rutaPlantillaId } : body.nueva ? { nueva: body.nueva } : undefined,
+    modalidad: body.modalidad,
+    nombre: body.nombre,
+    descripcion: body.descripcion,
+    unidad: body.unidad,
+    guardias: body.guardias,
+    confirmaciones: body.confirmaciones,
+  };
+}
 
 export function buildMapasRouter(tokens: TokenService): Router {
   const router = Router();
@@ -57,23 +142,25 @@ export function buildMapasRouter(tokens: TokenService): Router {
   router.get(
     '/ubicaciones',
     authorize('mapas', 'ver'),
-    asyncHandler(async (_req, res) => {
-      res.json({ data: await ubicacionesActuales() });
+    asyncHandler(async (req: AuthRequest, res) => {
+      // Disponibilidad GLOBAL (todos ven a todos los guardias y sus SOS);
+      // el alcance solo decide si se ve el nombre de la ruta que lo ocupa.
+      res.json({ data: await ubicacionesActuales(await alcanceOVacio(req.principal!)) });
     }),
   );
 
   router.get(
     '/patrullas',
     authorize('mapas', 'ver'),
-    asyncHandler(async (_req, res) => {
-      res.json({ data: await patrullasVigentes() });
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await patrullasVigentes(await alcanceDe(req.principal!)) });
     }),
   );
 
   // Jurisdicción (2026-10-05): polígono + color de cada EPI para la capa
   // "cristal" del mapa, y la EPI del usuario (null = sin restricción,
   // super_admin). La Web la usa para bloquear dibujar fuera de su EPI; la
-  // validación real está en mapas.service.ts (crear/asignar/cancelar).
+  // validación real está en el backend (crear/asignar/cancelar).
   router.get(
     '/jurisdiccion',
     authorize('mapas', 'ver'),
@@ -81,7 +168,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
       const principal = req.principal!;
       const epis = await episConPoligono();
       let miEpiCodigo: string | null = null;
-      let restringido = principal.role !== 'super_admin';
+      const restringido = principal.role !== 'super_admin';
       if (restringido) {
         try {
           miEpiCodigo = (await jurisdiccionDe(principal))?.epiCodigo ?? null;
@@ -103,53 +190,130 @@ export function buildMapasRouter(tokens: TokenService): Router {
   router.get(
     '/rutas',
     authorize('mapas', 'ver'),
-    asyncHandler(async (_req, res) => {
-      res.json({ data: await rutasPlantilla() });
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await rutasPlantilla(await alcanceDe(req.principal!)) });
     }),
   );
 
-  // Rediseño de rutas (RF-G3-09, 2026-09-14, Web): antes no existía forma
-  // de crear una `ruta_plantilla` — GET era de solo lectura. Necesario para
-  // que el Operador pueda compartir un mismo trazado entre varios guardias
-  // (patrulla.rutaPlantillaId). Mismo permiso que asignar una patrulla
-  // (`patrullaje:crear`) — es parte del mismo flujo de asignación.
+  // Biblioteca: guardar una ruta sin asignar a nadie (no crea patrullas).
+  // El permiso depende del tipo (lo valida el servicio): una predeterminada
+  // (establecida) usa `rutas_establecidas`, que tienen los 3 roles web; una
+  // guardada usa `patrullaje`.
   router.post(
     '/rutas',
-    authorize('patrullaje', 'crear'),
     asyncHandler(async (req: AuthRequest, res) => {
       const input = validate(crearRutaSchema, req.body);
       const jurisdiccion = await jurisdiccionDe(req.principal!);
-      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id, jurisdiccion });
+      const ruta = await crearRutaPlantilla({ ...input, creadoPorId: req.principal!.id, actor: actorDe(req), jurisdiccion });
       res.status(201).json({ data: ruta });
     }),
   );
 
-  // Cancela una ruta compartida: TODOS los guardias vigentes en esa
-  // rutaPlantillaId quedan 'cancelada' y desaparecen del Mapa de
-  // Patrullaje en Vivo (getGuardMarkers en la Web sigue mostrando el pin
-  // por telemetría si el guardia sigue en_servicio — lo que desaparece es
-  // la línea de ruta y su agrupación en el panel, no el guardia). Mismo
-  // permiso que editar una patrulla (`patrullaje:editar`) — el Operador ya
-  // lo tiene, cancelar no es "eliminar" (la fila se conserva para auditoría).
+  // Parámetros de una ruta establecida/guardada (nombre, tipo, modalidad...).
+  // Permiso por tipo de ruta, validado en el servicio.
+  router.patch(
+    '/rutas/:id',
+    asyncHandler(async (req: AuthRequest, res) => {
+      const patch = validate(actualizarRutaSchema, req.body);
+      const ruta = await actualizarRutaPlantilla(req.params.id!, patch, actorDe(req), await jurisdiccionDe(req.principal!));
+      res.json({ data: ruta });
+    }),
+  );
+
+  // Quita una ruta de la biblioteca (borrado lógico: activo=false). Las
+  // asignaciones en curso siguen: tienen su propia copia del trazado.
+  router.patch(
+    '/rutas/:id/archivar',
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await archivarRutaPlantilla(req.params.id!, actorDe(req), await jurisdiccionDe(req.principal!)) });
+    }),
+  );
+
+  // Compatibilidad: "cancelar la ruta" de una plantilla = cancelar SUS
+  // ejecuciones vigentes (cada una por separado). La web usa ahora
+  // PATCH /ejecuciones/:id/cancelar.
   router.patch(
     '/rutas/:id/cancelar',
     authorize('patrullaje', 'editar'),
     asyncHandler(async (req: AuthRequest, res) => {
-      const resultado = await cancelarRuta(req.params.id!, req.principal!.id, await jurisdiccionDe(req.principal!));
-      res.json({ data: resultado });
+      const j = await jurisdiccionDe(req.principal!);
+      const ejecuciones = await db.rutaEjecucion.findMany({
+        where: { rutaPlantillaId: req.params.id!, estado: { in: ['pendiente', 'activa', 'incompleta'] } },
+        select: { id: true },
+      });
+      if (ejecuciones.length === 0) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No hay guardias con esta ruta vigente para cancelar.' } });
+        return;
+      }
+      let cancelados = 0;
+      for (const e of ejecuciones) cancelados += (await cancelarEjecucion(e.id, actorDe(req), j)).cancelados;
+      res.json({ data: { rutaPlantillaId: req.params.id, cancelados } });
     }),
   );
 
-  // Complemento: cancela UN guardia de una ruta compartida sin tocar a los
-  // demás (pedido explícito 2026-09-14 — "poder eliminar por guardia por si
-  // solo queremos eliminar uno o varios pero no toda la ruta"). Mismo
-  // permiso/criterio que cancelar la ruta completa.
+  // Previsualización: conflictos de reasignación y avisos de GPS, sin escribir.
+  router.post(
+    '/ejecuciones/previsualizar',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const body = validate(previsualizarSchema, req.body);
+      res.json({ data: await previsualizarAsignacion({ ...body, jurisdiccion: await jurisdiccionDe(req.principal!) }) });
+    }),
+  );
+
+  // Asignar una ruta a un grupo de guardias: se asigna a los aptos y se
+  // informa quién no pudo asignarse (`noAsignados`).
+  router.post(
+    '/ejecuciones',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const body = validate(asignacionSchema, req.body);
+      const resultado = await asignarEjecucion(aInput(req, body, await jurisdiccionDe(req.principal!)));
+      res.status(201).json({ data: resultado });
+    }),
+  );
+
+  // Cancela UNA ejecución (no las demás de la misma plantilla).
+  router.patch(
+    '/ejecuciones/:id/cancelar',
+    authorize('patrullaje', 'editar'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await cancelarEjecucion(req.params.id!, actorDe(req), await jurisdiccionDe(req.principal!)) });
+    }),
+  );
+
+  // Saca a UN guardia de su ruta; si la ruta queda vacía, se cierra.
+  // F6: en un horario automático, `reposicion` decide si se busca al reemplazo
+  // más cercano ('automatica', por defecto) o el horario pasa a manual.
   router.patch(
     '/patrullas/:id/cancelar',
     authorize('patrullaje', 'editar'),
     asyncHandler(async (req: AuthRequest, res) => {
-      const resultado = await cancelarPatrulla(req.params.id!, req.principal!.id, await jurisdiccionDe(req.principal!));
-      res.json({ data: resultado });
+      const { reposicion } = validate(z.object({ reposicion: z.enum(['automatica', 'manual']).optional() }), req.body ?? {});
+      const r = await retirarGuardia(req.params.id!, actorDe(req), await jurisdiccionDe(req.principal!), { reposicion });
+      // Reemplazo al momento, sin esperar la próxima pasada del planificador.
+      if (r.reposicion === 'automatica' && r.ejecucionId) void intentarAhora(r.ejecucionId);
+      res.json({ data: r });
+    }),
+  );
+
+  router.post(
+    '/patrullas',
+    authorize('patrullaje', 'crear'),
+    asyncHandler(async (req: AuthRequest, res) => {
+      const input = validate(asignarLegadoSchema, req.body);
+      const activa = input.confirmarPatrullaId ? [{ guardiaId: input.guardiaId, patrullaId: input.confirmarPatrullaId }] : [];
+      const resultado = await asignarEjecucion({
+        actor: actorDe(req),
+        jurisdiccion: await jurisdiccionDe(req.principal!),
+        claveIdempotencia: input.claveIdempotencia ?? crypto.randomUUID(),
+        ruta: { rutaPlantillaId: input.rutaPlantillaId },
+        nombre: input.nombre,
+        descripcion: input.descripcion,
+        guardias: [{ guardiaId: input.guardiaId, punto: input.poligonoGeojson?.coordinates ?? null }],
+        confirmaciones: activa,
+      });
+      res.status(201).json({ data: { id: resultado.patrullaIds[0], ejecucionId: resultado.ejecucion.id } });
     }),
   );
 
@@ -169,18 +333,18 @@ export function buildMapasRouter(tokens: TokenService): Router {
   router.get(
     '/zonas',
     authorize('mapas', 'ver'),
-    asyncHandler(async (_req, res) => {
-      res.json({ data: await zonasCriticas() });
+    asyncHandler(async (req: AuthRequest, res) => {
+      res.json({ data: await zonasCriticas(await alcanceDe(req.principal!)) });
     }),
   );
 
   router.get(
     '/heatmap',
     authorize('mapas', 'ver'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req: AuthRequest, res) => {
       const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
       res.json({
-        data: await heatmap({ desde: str(req.query.desde), hasta: str(req.query.hasta), epiId: str(req.query.epiId) }),
+        data: await heatmap(await alcanceDe(req.principal!), { desde: str(req.query.desde), hasta: str(req.query.hasta), epiId: str(req.query.epiId) }),
       });
     }),
   );
@@ -189,7 +353,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
     '/zonas/recalcular',
     authorize('patrullaje', 'crear'),
     asyncHandler(async (req: AuthRequest, res) => {
-      res.json({ data: await recalcularZonasCriticas(req.principal!.id) });
+      res.json({ data: await recalcularZonasCriticas(req.principal!.id, await alcanceDe(req.principal!)) });
     }),
   );
 
@@ -197,7 +361,7 @@ export function buildMapasRouter(tokens: TokenService): Router {
   router.get(
     '/recorrido',
     authorize('mapas', 'ver'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req: AuthRequest, res) => {
       const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
       const data = await recorridoQuery({
         turnoId: str(req.query.turnoId),
@@ -205,22 +369,9 @@ export function buildMapasRouter(tokens: TokenService): Router {
         desde: str(req.query.desde),
         hasta: str(req.query.hasta),
       });
-      res.json({ data });
-    }),
-  );
-
-  router.post(
-    '/patrullas',
-    authorize('patrullaje', 'crear'),
-    asyncHandler(async (req: AuthRequest, res) => {
-      const input = validate(asignarSchema, req.body);
-      const patrulla = await asignarPatrulla({
-        ...input,
-        jurisdiccion: await jurisdiccionDe(req.principal!),
-        poligonoGeojson: input.poligonoGeojson as Prisma.InputJsonValue | null | undefined,
-        asignadoPorId: req.principal!.id,
-      });
-      res.status(201).json({ data: patrulla });
+      // F3: fuera de la supervisión global, solo los tramos de rutas de su EPI.
+      const alcance = await alcanceDe(req.principal!);
+      res.json({ data: alcance.tipo === 'global' || !data.guardiaId ? data : recortarRecorrido(data, await ventanasAutorizadas(data.guardiaId, alcance.epiId)) });
     }),
   );
 

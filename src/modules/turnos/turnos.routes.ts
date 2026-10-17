@@ -12,8 +12,11 @@ import {
   cerrarTurno,
   iniciarTurno,
   listTurnosDeGuardia,
+  recortarRecorrido,
   recorridoDeTurno,
+  ventanasAutorizadas,
 } from './turnos.service.js';
+import { alcanceDe } from '@modules/mapas/jurisdiccion';
 
 const iniciarSchema = z.object({
   selfieInicioUrl: z.string().url().max(500),
@@ -90,7 +93,13 @@ export function buildTurnosRouter(tokens: TokenService): Router {
         req.params.id!,
         esGuardia ? { guardiaId: req.principal!.id } : {},
       );
-      res.json({ data: result });
+      if (esGuardia) {
+        res.json({ data: result });
+        return;
+      }
+      // Web (F3): fuera de la supervisión global, solo los tramos de rutas de su EPI.
+      const alcance = await alcanceDe(req.principal!);
+      res.json({ data: alcance.tipo === 'global' ? result : recortarRecorrido(result, await ventanasAutorizadas(result.guardiaId!, alcance.epiId)) });
     }),
   );
 
