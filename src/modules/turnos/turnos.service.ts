@@ -292,9 +292,28 @@ export interface RecorridoQueryInput {
 export async function ventanasAutorizadas(guardiaId: string, epiId: string): Promise<{ desde: Date; hasta: Date }[]> {
   const patrullas = await db.patrulla.findMany({
     where: { guardiaId, OR: [{ ejecucion: { epiId } }, { ejecucionId: null, epiId }] },
-    select: { iniciadaEn: true, createdAt: true, completadaEn: true },
+    select: {
+      estado: true, iniciadaEn: true, createdAt: true, completadaEn: true,
+      ejecucion: { select: { inicio: true, fin: true, cerradaEn: true, estado: true } },
+    },
   });
-  return patrullas.map((p) => ({ desde: p.iniciadaEn ?? p.createdAt, hasta: p.completadaEn ?? new Date() }));
+  const ahora = new Date();
+  return patrullas.flatMap((p) => {
+    const activa = p.estado === 'asignada' || p.estado === 'en_curso';
+    // Una fila histórica sin cierre fiable no autoriza GPS posterior.
+    if (!activa && !p.completadaEn) return [];
+    const e = p.ejecucion;
+    if (e && ['finalizada', 'cancelada'].includes(e.estado) && !e.cerradaEn && !p.completadaEn) return [];
+    // Una reserva anterior al inicio del horario tampoco autoriza su GPS.
+    const desde = new Date(Math.max((p.iniciadaEn ?? p.createdAt).getTime(), e?.inicio.getTime() ?? 0));
+    const hasta = new Date(Math.min(
+      ahora.getTime(),
+      p.completadaEn?.getTime() ?? Infinity,
+      e?.fin?.getTime() ?? Infinity,
+      e?.cerradaEn?.getTime() ?? Infinity,
+    ));
+    return desde <= hasta ? [{ desde, hasta }] : [];
+  });
 }
 
 export function recortarRecorrido(r: RecorridoResult, ventanas: { desde: Date; hasta: Date }[]): RecorridoResult {

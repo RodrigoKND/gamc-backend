@@ -3,7 +3,10 @@
 -- permiso guardias.editar del Operador; quita lo agregado.
 -- Los hechos creados DESPUÉS de 0008 conservan la EPI calculada por su
 -- ubicación (no tienen valor anterior que restaurar).
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 
 ALTER TABLE hecho DISABLE TRIGGER trg_hecho_updated;
 UPDATE hecho h SET epi_id = r.epi_anterior
@@ -38,4 +41,7 @@ DROP FUNCTION IF EXISTS fn_gamc_en_anillo(double precision, double precision, js
 
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0008_segmentacion_epi'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif

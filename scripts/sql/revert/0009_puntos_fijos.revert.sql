@@ -3,7 +3,10 @@
 -- retirarlos antes (desde la web) para no dejar asignaciones sin destino.
 -- Las asignaciones ya cerradas pierden la referencia al punto (la columna se
 -- elimina), pero conservan su punto en patrulla.poligono_geojson.
+\if :{?reversion_entrega}
+\else
 BEGIN;
+\endif
 
 DO $$
 BEGIN
@@ -24,4 +27,7 @@ DROP TABLE IF EXISTS punto_fijo;
 
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   DELETE FROM _prisma_migrations WHERE migration_name = '0009_puntos_fijos'; END IF; END $$;
+\if :{?reversion_entrega}
+\else
 COMMIT;
+\endif

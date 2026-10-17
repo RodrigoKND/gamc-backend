@@ -1,7 +1,7 @@
 # Entrega F1–F7: EPIs, patrullaje, puntos fijos y programación
 
 Backend y base de datos. Requiere las migraciones 0001–0005. La web
-compatible es la entrega F1–F7 del frontend (`manual/Entrega-F1-F7.md`).
+compatible es la entrega F1–F7 del frontend (`cambios/Entrega-F1-F7.md`).
 
 ## Qué incluye
 
@@ -32,14 +32,15 @@ verificación propias. Excepciones aprobadas, todas con reversión:
 ## Despliegue
 
 1. **Respaldar la base** (`pg_dump -Fc`).
-2. **Aplicar la base de datos**, elegir UNA opción:
+2. Instalar dependencias con `npm ci` (incluye `prisma generate`).
+3. **Aplicar la base de datos**, elegir UNA opción:
    - Con Prisma (la base tiene `_prisma_migrations`):
      `npx prisma migrate deploy`
    - Con SQL (Supabase u otro servidor sin Prisma), desde la raíz del backend:
      `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f scripts/sql/entrega_f1_f7.sql`
      (una sola transacción: si algo falla, no queda nada aplicado).
-3. `npm ci` (incluye `prisma generate`), `npm run build` y `npm start`.
-4. Publicar la web compatible **después** del backend.
+4. `npm run build` y `npm start`.
+5. Publicar la web compatible **después** del backend.
 
 No hay variables de entorno nuevas obligatorias. `DESACTIVAR_VENCIMIENTO_RUTAS=1`
 apaga el planificador del servidor (cierres, horarios programados y plazos de
@@ -60,11 +61,15 @@ paso usa bloqueos de la base.
 
 ## Reversión
 
-Volver a publicar primero el backend y la web anteriores. Después:
+Resolver primero los bloqueos desde la web actual (cancelar horarios y retirar
+guardias de puntos fijos; pasar programaciones automáticas a manual o eliminarlas).
+Detener el backend y su planificador durante la reversión. Después:
 
 `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/sql/revert/entrega_f1_f7.revert.sql`
 
-Revierte de 0012 a 0006. Se detiene, sin cambiar nada, si hay horarios
+Tras completarla, publicar el backend y la web anteriores.
+
+Revierte de 0012 a 0006 en una sola transacción. Se detiene, sin cambiar nada, si hay horarios
 abiertos, programaciones automáticas o guardias en puntos fijos: el mensaje
 indica qué cancelar desde la web antes de reintentar. También se puede
 revertir una sola migración con su archivo en `scripts/sql/revert/`.
