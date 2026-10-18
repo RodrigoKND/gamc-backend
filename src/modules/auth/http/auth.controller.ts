@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { env } from '@config/env';
 import { Errors, validate } from '@shared/index';
 import { COOKIES, clearSessionCookies, setSessionCookies } from '@shared/cookies';
 import type { AuthSessionMetadata } from '../application/auth.types.js';
@@ -137,7 +138,7 @@ export function createAuthController(service: AuthService): AuthController {
       res.json({
         data: {
           principal: publicPrincipal(session.principal),
-          accessTokenExpiresIn: 900,
+          accessTokenExpiresIn: env.ACCESS_TOKEN_MINUTES * 60,
         },
       });
     }),

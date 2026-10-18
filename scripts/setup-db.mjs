@@ -23,6 +23,12 @@ import 'dotenv/config';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_ROOT = join(__dirname, '..');
 
+// Borra el esquema completo: nunca contra producción.
+if (process.env.NODE_ENV === 'production') {
+  console.error('db:setup es solo para desarrollo local (NODE_ENV=production).');
+  process.exit(1);
+}
+
 const noSeed = process.argv.includes('--no-seed');
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {

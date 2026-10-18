@@ -47,6 +47,7 @@ export function buildTelemetryRouter(tokens: TokenService): Router {
   // marcar como atendida.
   router.get(
     '/estado',
+    requireGuardia,
     asyncHandler(async (req: AuthRequest, res) => {
       const guardiaId = req.principal!.id;
       const { db } = await import('@infra/database');

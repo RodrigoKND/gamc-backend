@@ -24,13 +24,9 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   }
 
   logger.error({ err, msg: 'error no controlado' });
-  // DEBUG TEMPORAL — revertir tras diagnosticar el 500 en cPanel.
+  // El detalle queda solo en el log; al cliente nunca le llega el stack.
   res.status(500).json({
-    error: {
-      code: 'INTERNAL_ERROR',
-      message: 'Error interno del servidor.',
-      debug: { message: (err as Error)?.message, stack: (err as Error)?.stack },
-    },
+    error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor.' },
   });
 };
 

@@ -2,7 +2,9 @@ import http from 'node:http';
 import { logger } from '@infra/logger';
 import { env } from '@config/env';
 import { db } from '@infra/database';
-import { initRealtime, ROOM_EPI_GLOBAL, salaEpi } from '@infra/realtime';
+import { initRealtime, ROOM_EPI_GLOBAL, salaEpi, salaEpiRol } from '@infra/realtime';
+import { barridoEscalamientoSos } from '@modules/guardias/sosDespacho';
+import { SOS_BARRIDO_INTERVALO_MS } from '@modules/guardias/config';
 import { createApp } from './app.js';
 import { buildContainer } from './composition.js';
 import { pasadaPlanificador } from '@modules/programacion/planificador';
@@ -19,7 +21,7 @@ const server = http.createServer(app);
 initRealtime(server, container.tokens.verifyAccessToken.bind(container.tokens), async (claims) => {
   if (claims.rol === 'super_admin') return [ROOM_EPI_GLOBAL];
   const user = await db.user.findUnique({ where: { id: claims.sub }, select: { epi: { select: { id: true, activo: true } } } });
-  return user?.epi?.activo ? [salaEpi(user.epi.id)] : [];
+  return user?.epi?.activo ? [salaEpi(user.epi.id), salaEpiRol(user.epi.id, claims.rol)] : [];
 });
 
 server.listen(env.PORT, () => {
@@ -54,11 +56,18 @@ if (process.env.DESACTIVAR_VENCIMIENTO_RUTAS !== '1') {
   tick();
 }
 
+// SOS sin atender: escala a supervisión y a la EPI vecina (sosDespacho.ts).
+const escalamientoSos = setInterval(() => {
+  barridoEscalamientoSos().catch((err) => logger.error({ err }, 'Falló el barrido de escalamiento SOS'));
+}, SOS_BARRIDO_INTERVALO_MS);
+escalamientoSos.unref();
+
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   if (vencimiento) clearInterval(vencimiento);
+  clearInterval(escalamientoSos);
   // logger.info({ signal }, 'Apagando...');
   server.close(async () => {
     await db.$disconnect();

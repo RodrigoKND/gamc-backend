@@ -1,18 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { env, r2Configurado } from '@config/env';
+import { logger } from '@infra/logger';
 
 // Almacenamiento de archivos subidos (selfie de inicio de turno + evidencia
-// foto/video de un hecho) — BD_UNIFICADA solo definía la columna `url`
-// (turno.selfie_inicio_url / hecho_evidencia.url), nunca dónde vivía el
-// binario. Disco local del servidor: mismo criterio que el resto del
-// proyecto ("un solo servidor controla su Postgres", BD_UNIFICADA §9) — sin
-// depender de S3/Cloudinary hasta que haga falta escalar más allá de un
-// servidor. Se sirve estático desde /media/<archivo> (ver app.ts).
+// foto/video de un hecho). La BD solo guarda la URL pública
+// (turno.selfie_inicio_url / hecho_evidencia.url).
+//
+// · Con las variables R2_* definidas → Cloudflare R2 (API compatible con S3).
+//   El binario no toca el disco del servidor: sobrevive a reinicios y
+//   despliegues y se sirve desde el dominio público del bucket.
+// · Sin ellas (desarrollo local) → carpeta `uploads/`, servida en /media.
 
 export const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 export const MIME_A_EXT: Record<string, { ext: string; tipo: 'foto' | 'video' }> = {
   'image/jpeg': { ext: '.jpg', tipo: 'foto' },
@@ -26,21 +29,13 @@ export const MIME_A_EXT: Record<string, { ext: string; tipo: 'foto' | 'video' }>
 // real (una foto o un clip por request, nunca un archivo por lote).
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-// El nombre de archivo NUNCA sale del cliente (ni de `originalname`, que un
-// atacante controla por completo): se genera con un UUID propio y la
-// extensión se resuelve contra la lista blanca de MIME_A_EXT, no contra lo
-// que el cliente diga que es. Elimina cualquier vector de path traversal o
-// de "subir un .html/.php disfrazado de foto".
-export const uploadStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const info = MIME_A_EXT[file.mimetype];
-    cb(null, `${randomUUID()}${info?.ext ?? ''}`);
-  },
-});
-
+// El archivo queda en memoria (≤ 25 MB) y se entrega al destino elegido.
+// El nombre NUNCA sale del cliente (ni de `originalname`, que un atacante
+// controla por completo): se genera con un UUID propio y la extensión se
+// resuelve contra la lista blanca de MIME_A_EXT. Elimina cualquier vector de
+// path traversal o de "subir un .html/.php disfrazado de foto".
 export const upload = multer({
-  storage: uploadStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (!MIME_A_EXT[file.mimetype]) {
@@ -50,3 +45,48 @@ export const upload = multer({
     cb(null, true);
   },
 });
+
+const r2 = r2Configurado
+  ? new S3Client({
+      region: 'auto',
+      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! },
+    })
+  : null;
+
+if (!r2) {
+  void fs.mkdir(UPLOADS_DIR, { recursive: true });
+  logger.info({ dir: UPLOADS_DIR }, 'Media: almacenamiento local (R2 no configurado)');
+}
+
+export interface ArchivoGuardado {
+  url: string;
+  tipo: 'foto' | 'video';
+}
+
+/**
+ * Guarda el archivo y devuelve su URL pública definitiva.
+ * `origenLocal` (protocolo + host de la petición) solo se usa sin R2, para
+ * que la URL funcione igual desde localhost (web) o la IP LAN (celular).
+ */
+export async function guardarArchivo(file: Express.Multer.File, origenLocal: string): Promise<ArchivoGuardado> {
+  const info = MIME_A_EXT[file.mimetype]!;
+  const nombre = `${randomUUID()}${info.ext}`;
+
+  if (r2) {
+    const clave = `${info.tipo === 'foto' ? 'fotos' : 'videos'}/${nombre}`;
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: env.R2_BUCKET,
+        Key: clave,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
+    return { url: `${env.R2_PUBLIC_URL!.replace(/\/+$/, '')}/${clave}`, tipo: info.tipo };
+  }
+
+  await fs.writeFile(path.join(UPLOADS_DIR, nombre), file.buffer);
+  return { url: `${origenLocal}/media/${nombre}`, tipo: info.tipo };
+}

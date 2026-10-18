@@ -72,9 +72,8 @@ export function createApp(c: Container): express.Express {
   app.use('/api/patrullas', buildPatrullasRouter(c.tokens));
   app.use('/api/checkpoints', buildCheckpointsRouter(c.tokens));
   app.use('/api/media', buildMediaRouter(c.tokens));
-  // Archivos subidos (selfie de turno, evidencia de hecho) — servidos
-  // estáticos desde disco, namespace separado de /api para poder, más
-  // adelante, servirlos directo desde Nginx sin pasar por Node.
+  // Archivos guardados en disco (desarrollo sin R2, o subidos antes de
+  // activar R2). Con R2 las URLs nuevas apuntan directo al bucket.
   app.use(
     '/media',
     express.static(UPLOADS_DIR, { maxAge: '365d', immutable: true }),

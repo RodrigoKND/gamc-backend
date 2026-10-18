@@ -1,6 +1,7 @@
 import { db } from '@infra/database';
 import { EVENTS, publish, publishTerritorial } from '@infra/realtime';
 import { logger } from '@infra/logger';
+import { despacharSos } from '@modules/guardias/sosDespacho';
 import { Errors } from '@shared/errors';
 import { evaluarEstadoRuta, limiteIncorporacion } from '@modules/ejecuciones/estadoRuta';
 import { objetivoDe } from '@modules/ejecuciones/incorporacion';
@@ -144,6 +145,8 @@ export async function ingestTelemetry(input: TelemetryInput): Promise<TelemetryR
   });
   if (esSos) {
     publish(EVENTS.sosNuevo, payload);
+    // Además del aviso general, se dirige a quien le corresponde atenderlo.
+    void despacharSos({ id: payload.id, guardiaId: payload.guardiaId, lat: payload.lat, lng: payload.lng, capturadoEn: payload.capturadoEn });
   }
   await actualizarEstadoRuta(payload).catch((err) => logger.warn({ err, guardiaId: payload.guardiaId }, 'No se pudo calcular el estado de ruta'));
   return payload;

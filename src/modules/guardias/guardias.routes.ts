@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler, validate } from "@shared/index";
 import type { TokenService } from "@modules/auth/application/token.service";
@@ -96,7 +96,7 @@ export function buildGuardiasRouter(tokens: TokenService): Router {
         return res
           .status(404)
           .json({
-            error: { code: "NOT_FOUND", message: "GuardÃ­a no encontrado." },
+            error: { code: "NOT_FOUND", message: "Guardia no encontrado." },
           });
       res.json({ data: guardia });
     }),

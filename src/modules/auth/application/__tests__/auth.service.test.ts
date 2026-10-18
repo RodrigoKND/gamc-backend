@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import type { Tx } from '@infra/database';
 import { Errors, AppError } from '@shared/errors';
 import { AuthService, type AuditInput } from '@modules/auth/application/auth.service';
@@ -64,7 +64,7 @@ describe('AuthService', () => {
       expect(res.principal.permissions.usuarios?.crear).toBe(false);
     });
 
-    it('login por usuario (sin @) tambiÃ©n resuelve', async () => {
+    it('login por usuario (sin @) también resuelve', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -72,7 +72,7 @@ describe('AuthService', () => {
       await expect(service.login('carlos.mendoza', 'Admin#2025', {})).resolves.toBeTruthy();
     });
 
-    it('contraseÃ±a incorrecta â†’ INVALID_CREDENTIALS (401)', async () => {
+    it('contraseña incorrecta → INVALID_CREDENTIALS (401)', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -83,7 +83,7 @@ describe('AuthService', () => {
       expect((err as AppError).code).toBe(Errors.invalidCredentials().code);
     });
 
-    it('cuenta no activa â†’ ACCOUNT_DISABLED (403)', async () => {
+    it('cuenta no activa → ACCOUNT_DISABLED (403)', async () => {
       const repo = new InMemoryAuthRepository();
       const row = await seedActiveAdmin(repo, sharedHash);
       repo.users.set(row.id, { ...row, estado: 'suspendido' });
@@ -95,8 +95,8 @@ describe('AuthService', () => {
     });
   });
 
-  describe('refresh (rotaciÃ³n)', () => {
-    it('rotaciÃ³n normal: token nuevo sirve; el viejo se revoca', async () => {
+  describe('refresh (rotación)', () => {
+    it('rotación normal: token nuevo sirve; el viejo se revoca', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -107,7 +107,7 @@ describe('AuthService', () => {
       expect(rotated.accessToken).toBeTruthy();
       expect(rotated.refreshToken).not.toBe(login.refreshToken);
 
-      // El token viejo ya estÃ¡ revocado â†’ reuso detectado.
+      // El token viejo ya está revocado → reuso detectado.
       await expect(service.refresh(login.refreshToken, {})).rejects.toMatchObject({ status: 401 });
     });
 
@@ -121,7 +121,7 @@ describe('AuthService', () => {
       await expect(service.refresh(login.refreshToken, {})).rejects.toMatchObject({ status: 401 });
     });
 
-    it('token inexistente â†’ 401', async () => {
+    it('token inexistente → 401', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -129,8 +129,8 @@ describe('AuthService', () => {
     });
   });
 
-  describe('recuperaciÃ³n de contraseÃ±a', () => {
-    it('identifier desconocido â†’ accepta sin enumerar cuentas', async () => {
+  describe('recuperación de contraseña', () => {
+    it('identifier desconocido → accepta sin enumerar cuentas', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -139,7 +139,7 @@ describe('AuthService', () => {
       expect(res.accepted).toBe(true);
     });
 
-    it('identifier vÃ¡lido â†’ accepta y entrega cÃ³digo en dev', async () => {
+    it('identifier válido → accepta y entrega código en dev', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -149,7 +149,7 @@ describe('AuthService', () => {
       expect(res.code).toMatch(/^\d{6}$/);
     });
 
-    it('confirmRecovery con cÃ³digo correcto actualiza el hash y reactiva la cuenta', async () => {
+    it('confirmRecovery con código correcto actualiza el hash y reactiva la cuenta', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -164,7 +164,7 @@ describe('AuthService', () => {
       await expect(service.login('carlos.mendoza', 'Admin#2025', {})).rejects.toMatchObject({ status: 401 });
     });
 
-    it('cÃ³digo incorrecto â†’ RESET_CODE_INVALID', async () => {
+    it('código incorrecto → RESET_CODE_INVALID', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -175,7 +175,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('cÃ³digo expirado â†’ RESET_CODE_EXPIRED', async () => {
+    it('código expirado → RESET_CODE_EXPIRED', async () => {
       const repo = new InMemoryAuthRepository();
       await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -189,7 +189,7 @@ describe('AuthService', () => {
   });
 
   describe('changePassword', () => {
-    it('contraseÃ±a actual incorrecta â†’ VALIDATION_ERROR', async () => {
+    it('contraseña actual incorrecta → VALIDATION_ERROR', async () => {
       const repo = new InMemoryAuthRepository();
       const row = await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
@@ -207,7 +207,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('cambio correcto: la nueva contraseÃ±a entra y la vieja no', async () => {
+    it('cambio correcto: la nueva contraseña entra y la vieja no', async () => {
       const repo = new InMemoryAuthRepository();
       const row = await seedActiveAdmin(repo, sharedHash);
       const { service } = buildService(repo);
