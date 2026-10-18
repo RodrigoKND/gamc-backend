@@ -1,8 +1,8 @@
-﻿import type { z, AnyZodObject } from 'zod';
+import type { z, AnyZodObject } from 'zod';
 import { Errors } from '@shared/errors';
 
-// ValidaciÃ³n de DTOs con zod, reutilizable en controllers y middlewares.
-// `validate` lanza un AppError de validaciÃ³n con el detalle de cada campo,
+// Validación de DTOs con zod, reutilizable en controllers y middlewares.
+// `validate` lanza un AppError de validación con el detalle de cada campo,
 // para que la vista pueda mostrar errores inline por input.
 
 export type InferZod<TSchema extends AnyZodObject> = z.infer<TSchema>;
@@ -17,7 +17,7 @@ export function validate<TSchema extends AnyZodObject>(
       path: issue.path.join('.'),
       message: issue.message,
     }));
-    throw Errors.validation('Datos de entrada invÃ¡lidos.', issues);
+    throw Errors.validation('Datos de entrada inválidos.', issues);
   }
   return result.data;
 }

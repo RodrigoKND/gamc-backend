@@ -4,6 +4,7 @@ import { Errors } from '@shared/errors';
 import { nombreCompleto } from '@shared/names';
 import { logAudit } from '@modules/auditoria/auditoria.service';
 import { esModalidad, type TipoRuta } from '@modules/ejecuciones/config';
+import { estadoDespacho, type EstadoDespacho } from '@modules/guardias/sosDespacho';
 import { peekAddress, reverseGeocode } from './geocoding.service.js';
 import { lineasDe, poligonosDeEpi, trazadoDentro } from '@modules/epis/index';
 import { enAlcance, epiDePunto, epiDeAlcance, epiEfectiva, exigirDentroDeEpi, exigirMismaEpi, type Alcance, type Jurisdiccion } from './jurisdiccion.js';
@@ -27,6 +28,8 @@ export interface UbicacionGuardiaRow {
   sosAbierto: boolean;
   /** Ids de las alertas SOS pendientes (para atender exactamente esas). */
   sosAlertaIds: string[];
+  /** A quién se dirigió el SOS abierto (EPI responsable, quién atiende, si ya escaló). */
+  sosDespacho: EstadoDespacho | null;
   estadoOperativo: string;
   bateriaPct: number | null;
   turnoId: string | null;
@@ -127,6 +130,7 @@ export async function ubicacionesActuales(alcance: Alcance): Promise<UbicacionGu
       sosEstado: p.sosEstado,
       sosAbierto: Boolean(alertas),
       sosAlertaIds: alertas?.ids ?? [],
+      sosDespacho: alertas ? await estadoDespacho({ guardiaId: g.id, alertaIds: alertas.ids, desde: alertas.desde, lat: p.lat, lng: p.lng }) : null,
       estadoOperativo: g.estadoOperativo,
       bateriaPct: p.bateriaPct,
       precisionM: p.precisionM != null ? Number(p.precisionM) : null,

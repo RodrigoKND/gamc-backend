@@ -26,6 +26,8 @@ import { logger } from '@infra/logger';
 export const ROOM_DASHBOARD = 'dashboard';
 export const ROOM_EPI_GLOBAL = 'epi:global';
 export const salaEpi = (epiId: string) => `epi:${epiId}`;
+/** Usuarios de un rol dentro de una EPI (p. ej. los operadores de la EPI Norte): despacho de SOS. */
+export const salaEpiRol = (epiId: string, rol: string) => `epi:${epiId}:rol:${rol}`;
 
 /** Salas territoriales del usuario web (las calcula el composition root). */
 export type ResolverSalas = (claims: AccessTokenClaims) => Promise<string[]>;
@@ -41,6 +43,8 @@ export const EVENTS = {
   patrullaEstadoRuta: 'patrulla:estado_ruta',
   /** F2: alerta SOS atendida (con ids de las alertas). */
   sosAtendido: 'sos:atendido',
+  /** SOS dirigido a quien le corresponde atenderlo (operador de la EPI responsable) y escalamientos. */
+  sosDespacho: 'sos:despacho',
   /** F4: cambió el catálogo de puntos fijos (alta, edición, traslado, desactivación). */
   puntoFijoActualizado: 'punto_fijo:actualizado',
   /** F5: cambió una programación o uno de sus horarios (abierto, asignado, cerrado, cancelado). */
@@ -122,6 +126,16 @@ export function publish(event: string, payload: unknown): void {
  */
 export function publishTerritorial(event: string, epiId: string | null | undefined, payload: unknown): void {
   getIo().to(epiId ? [ROOM_EPI_GLOBAL, salaEpi(epiId)] : ROOM_EPI_GLOBAL).emit(event, payload);
+}
+
+/** Evento a salas concretas (p. ej. solo los operadores de una EPI). */
+export function publishSalas(event: string, salas: string[], payload: unknown): void {
+  if (salas.length > 0) getIo().to(salas).emit(event, payload);
+}
+
+/** Sockets conectados ahora mismo a una sala (en este proceso). */
+export function conectadosEn(sala: string): number {
+  return io?.sockets.adapter.rooms.get(sala)?.size ?? 0;
 }
 
 /** Cierra las conexiones de un usuario (p. ej. tras cambiarle la EPI): al reconectar recalcula sus salas. */

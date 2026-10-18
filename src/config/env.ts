@@ -5,6 +5,10 @@ import { z } from 'zod';
 // Cualquier variable nueva se agrega AQUÍ, nunca se lee process.env en el
 // resto del código: cambiar una variable = tocar solo este archivo.
 
+// Variable opcional: vacía en el .env cuenta como no definida.
+const opcional = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : typeof v === 'string' ? v.trim() : v), schema.optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -35,6 +39,14 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   RESET_CODE_MINUTES: z.coerce.number().int().min(1).default(10),
 
+  // Cloudflare R2 (fotos y videos). Las cinco juntas activan R2; sin ellas
+  // los archivos van a `uploads/` (solo desarrollo local).
+  R2_ACCOUNT_ID: opcional(z.string()),
+  R2_ACCESS_KEY_ID: opcional(z.string()),
+  R2_SECRET_ACCESS_KEY: opcional(z.string()),
+  R2_BUCKET: opcional(z.string()),
+  R2_PUBLIC_URL: opcional(z.string().url()),
+
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
@@ -49,6 +61,15 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+const R2_VARS = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'] as const;
+const r2Definidas = R2_VARS.filter((k) => env[k]);
+if (r2Definidas.length > 0 && r2Definidas.length < R2_VARS.length) {
+  console.error(`Configuración de Cloudflare R2 incompleta. Faltan: ${R2_VARS.filter((k) => !env[k]).join(', ')}`);
+  process.exit(1);
+}
+
+export const r2Configurado = r2Definidas.length === R2_VARS.length;
 
 export const IS_PROD = env.NODE_ENV === 'production';
 export const IS_DEV = !IS_PROD;

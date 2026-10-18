@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '@shared/index';
 import type { TokenService } from '@modules/auth/application/token.service';

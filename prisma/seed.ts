@@ -43,7 +43,9 @@ const EPIS = [
   ['central', 'EPI Central'],
 ] as const;
 
-// Matriz role → (recurso, ver, crear, editar, eliminar) — idéntica a la del schema.sql.
+// Matriz role → (recurso, ver, crear, editar, eliminar): la misma que dejan
+// las migraciones 0001–0012. El seed reemplaza los permisos de cada rol, así
+// que cualquier recurso nuevo de una migración se agrega TAMBIÉN aquí.
 const ROLE_PERMISOS: Record<string, ReadonlyArray<readonly [string, boolean, boolean, boolean, boolean]>> = {
   super_admin: [
     ['usuarios', true, true, true, true],
@@ -54,6 +56,12 @@ const ROLE_PERMISOS: Record<string, ReadonlyArray<readonly [string, boolean, boo
     ['mapas', true, false, false, false],
     ['auditoria', true, false, false, false],
     ['reportes', true, false, false, false],
+    ['sos', true, false, true, false],
+    ['rutas_establecidas', true, true, true, true],
+    ['dashboard', true, false, false, false],
+    ['jurisdiccion_usuarios', true, false, true, false],
+    ['puntos_fijos', true, true, true, true],
+    ['programacion_rutas', true, true, true, true],
   ],
   admin: [
     ['usuarios', true, false, true, false],
@@ -64,13 +72,25 @@ const ROLE_PERMISOS: Record<string, ReadonlyArray<readonly [string, boolean, boo
     ['mapas', true, false, false, false],
     ['auditoria', true, false, false, false],
     ['reportes', true, false, false, false],
+    ['sos', true, false, false, false],
+    ['rutas_establecidas', true, true, true, false],
+    ['dashboard', true, false, false, false],
+    ['jurisdiccion_usuarios', false, false, false, false],
+    ['puntos_fijos', true, false, false, false],
+    ['programacion_rutas', true, false, false, false],
   ],
   operador_monitoreo: [
-    ['guardias', true, false, true, false],
+    ['guardias', true, false, false, false],
     ['hechos', true, false, true, false],
     ['patrullaje', true, true, true, false],
     ['mapas', true, false, false, false],
     ['reportes', true, false, false, false],
+    ['sos', true, false, true, false],
+    ['rutas_establecidas', true, true, true, false],
+    ['dashboard', false, false, false, false],
+    ['jurisdiccion_usuarios', false, false, false, false],
+    ['puntos_fijos', true, true, true, true],
+    ['programacion_rutas', true, true, true, true],
   ],
 };
 

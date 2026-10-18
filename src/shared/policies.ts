@@ -23,6 +23,12 @@ export const RECURSOS = [
   'mapas',
   'auditoria',
   'reportes',
+  'sos',
+  'rutas_establecidas',
+  'dashboard',
+  'jurisdiccion_usuarios',
+  'puntos_fijos',
+  'programacion_rutas',
 ] as const;
 
 export type Recurso = (typeof RECURSOS)[number];
