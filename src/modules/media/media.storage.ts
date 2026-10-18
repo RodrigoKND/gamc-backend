@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import type { S3Client } from '@aws-sdk/client-s3';
 import { env, r2Configurado } from '@config/env';
 import { logger } from '@infra/logger';
 
@@ -46,15 +46,28 @@ export const upload = multer({
   },
 });
 
-const r2 = r2Configurado
-  ? new S3Client({
-      region: 'auto',
-      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! },
-    })
-  : null;
+// El SDK de S3 pesa y solo hace falta con R2: se importa bajo demanda para
+// que el API arranque aunque el paquete no esté instalado (almacenamiento local).
+let r2: Promise<S3Client> | null = null;
 
-if (!r2) {
+function clienteR2(): Promise<S3Client> {
+  r2 ??= import('@aws-sdk/client-s3')
+    .then(
+      ({ S3Client: Client }) =>
+        new Client({
+          region: 'auto',
+          endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+          credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! },
+        }),
+    )
+    .catch((err: unknown) => {
+      r2 = null; // permite reintentar si fue un fallo transitorio
+      throw err;
+    });
+  return r2;
+}
+
+if (!r2Configurado) {
   void fs.mkdir(UPLOADS_DIR, { recursive: true });
   logger.info({ dir: UPLOADS_DIR }, 'Media: almacenamiento local (R2 no configurado)');
 }
@@ -73,9 +86,10 @@ export async function guardarArchivo(file: Express.Multer.File, origenLocal: str
   const info = MIME_A_EXT[file.mimetype]!;
   const nombre = `${randomUUID()}${info.ext}`;
 
-  if (r2) {
+  if (r2Configurado) {
     const clave = `${info.tipo === 'foto' ? 'fotos' : 'videos'}/${nombre}`;
-    await r2.send(
+    const [{ PutObjectCommand }, cliente] = await Promise.all([import('@aws-sdk/client-s3'), clienteR2()]);
+    await cliente.send(
       new PutObjectCommand({
         Bucket: env.R2_BUCKET,
         Key: clave,

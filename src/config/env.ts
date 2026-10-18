@@ -14,7 +14,19 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es obligatoria (schema.sql en GAMC/database)'),
 
+  // Pool de Prisma. Se aplican solo si DATABASE_URL no trae ya
+  // `connection_limit` / `pool_timeout`. En hosting compartido, un pool chico
+  // evita agotar `max_connections` de PostgreSQL.
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  DB_POOL_TIMEOUT_S: z.coerce.number().int().min(1).max(120).default(20),
+
+  // Coste de bcrypt para hashes NUEVOS (OWASP: >= 10). Los hashes existentes
+  // con otro coste se migran solos en el siguiente login correcto.
+  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(14).default(10),
+
   JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres'),
+  // TTL (segundos) de la caché de lecturas agregadas del dashboard.
+  DASHBOARD_CACHE_SECONDS: z.coerce.number().int().min(0).max(300).default(5),
   ACCESS_TOKEN_MINUTES: z.coerce.number().int().min(1).default(15),
   REFRESH_TOKEN_DAYS: z.coerce.number().int().min(1).default(7),
 

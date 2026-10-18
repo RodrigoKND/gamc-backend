@@ -43,7 +43,7 @@ export function createApp(c: Container): express.Express {
   app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cors(corsOptions));
-  app.use(compression({ threshold: 0 }));
+  app.use(compression({ threshold: 1024 })); // por debajo de 1 KB comprimir cuesta más CPU de lo que ahorra
   app.use(cookieParser());
   app.use(express.json({ limit: '1mb' }));
   app.use(pinoHttp({ logger }));

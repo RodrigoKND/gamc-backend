@@ -2,6 +2,8 @@ import { env } from '@config/env';
 import type { Tx } from '@infra/database';
 import { Errors } from '@shared/errors';
 import { newCsrfToken, randomResetCode, sha256 } from '@shared/security';
+import { TtlCache } from '@shared/cache';
+import { runInBackground } from '@shared/background';
 import type { AuthRepository } from '@modules/auth/domain/auth.repository';
 import type {
   GuardiaCredentialRow,
@@ -81,20 +83,27 @@ function principalFrom(
   };
 }
 
-export async function buildPrincipal(
-  repo: AuthRepository,
-  user: UserCredentialRow,
-): Promise<AuthenticatedPrincipal> {
-  const perms = permissionsFrom(await repo.getPermissionsByRole(user.roleCodigo));
-  return principalFrom(user, perms);
-}
-
 // Orquesta los casos de uso de autenticación. NO conoce Express ni cookies:
 // devuelve tokens+principal; el framework de presentación los escribe en las
 // cookies. Esto mantiene la capa de aplicación testeable sin HTTP.
 
+/** Los permisos por rol solo cambian con un deploy/seed: un minuto de caché basta. */
+const ROLE_PERMISSIONS_TTL_MS = 60_000;
+
 export class AuthService {
+  private readonly rolePermissions = new TtlCache<string, PermissionsMap>({ ttlMs: ROLE_PERMISSIONS_TTL_MS, maxEntries: 50 });
+
   constructor(private readonly deps: AuthServiceDeps) {}
+
+  private permissionsFor(roleCodigo: string): Promise<PermissionsMap> {
+    return this.rolePermissions.getOrLoad(roleCodigo, async () =>
+      permissionsFrom(await this.deps.repo.getPermissionsByRole(roleCodigo)),
+    );
+  }
+
+  private async principalFor(user: UserCredentialRow): Promise<AuthenticatedPrincipal> {
+    return principalFrom(user, await this.permissionsFor(user.roleCodigo));
+  }
 
   async login(
     identifier: string,
@@ -106,20 +115,35 @@ export class AuthService {
     if (!user) throw Errors.invalidCredentials();
     if (user.estado !== 'activo') throw Errors.accountDisabled();
     
-    const passwordOk = await PasswordService.verify(password, user.passwordHash);
+    // bcrypt es la parte lenta: los permisos (cacheados) se cargan en paralelo.
+    const [passwordOk, permissions] = await Promise.all([
+      PasswordService.verify(password, user.passwordHash),
+      this.permissionsFor(user.roleCodigo),
+    ]);
     if (!passwordOk) throw Errors.invalidCredentials();
-    
-    const principal = await buildPrincipal(this.deps.repo, user);
+
+    const principal = principalFrom(user, permissions);
     const session = await this.issueSession('user', user.id, user.nombre, principal, meta);
-    await this.deps.repo.updateUserLastLogin(user.id);
-    await this.deps.audit({
-      actorUserId: user.id,
-      accion: 'login',
-      recurso: 'auth',
-      recursoId: user.id,
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-    });
+
+    // Migra el hash al coste configurado sin que el usuario lo note.
+    if (PasswordService.needsRehash(user.passwordHash)) {
+      runInBackground('login:rehash', async () =>
+        this.deps.repo.rehashUserPassword(user.id, await PasswordService.hash(password)),
+      );
+    }
+
+    // Ni el último acceso ni la auditoría condicionan la respuesta.
+    runInBackground('login:ultimo_login', () => this.deps.repo.updateUserLastLogin(user.id));
+    runInBackground('login:audit', () =>
+      this.deps.audit({
+        actorUserId: user.id,
+        accion: 'login',
+        recurso: 'auth',
+        recursoId: user.id,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      }),
+    );
 
     return session;
   }
@@ -283,7 +307,7 @@ export class AuthService {
     if (!user) throw Errors.auth();
     if (user.estado !== 'activo') throw Errors.accountDisabled();
 
-    const principal = await buildPrincipal(this.deps.repo, user);
+    const principal = await this.principalFor(user);
     const pair = this.deps.refreshIssuer.issue(meta, record.familia);
 
     await this.deps.withTransaction(async (tx) => {
@@ -328,7 +352,7 @@ export class AuthService {
     const user = await this.deps.repo.findUserById(claims.sub);
     if (!user) throw Errors.auth();
     if (user.estado !== 'activo') throw Errors.accountDisabled();
-    return buildPrincipal(this.deps.repo, user);
+    return this.principalFor(user);
   }
 
   /** Solicita un código de recuperación. SIEMPRE responde aceptado (no enumerar cuentas). */

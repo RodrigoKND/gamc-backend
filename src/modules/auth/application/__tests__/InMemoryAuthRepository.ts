@@ -72,6 +72,11 @@ export class InMemoryAuthRepository implements AuthRepository {
     if (u) this.users.set(userId, { ...u, passwordHash });
   }
 
+  async rehashUserPassword(userId: string, passwordHash: string): Promise<void> {
+    const u = this.users.get(userId);
+    if (u) this.users.set(userId, { ...u, passwordHash });
+  }
+
   async updateGuardiaPassword(): Promise<void> {
     void 0;
   }
