@@ -142,6 +142,10 @@ export class PrismaAuthRepository implements AuthRepository {
     });
   }
 
+  async rehashUserPassword(userId: string, passwordHash: string): Promise<void> {
+    await this.client.user.update({ where: { id: userId }, data: { passwordHash } });
+  }
+
   async updateGuardiaPassword(guardiaId: string, passwordHash: string): Promise<void> {
     await this.client.guardia.update({
       where: { id: guardiaId },

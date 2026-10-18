@@ -48,6 +48,45 @@ describe('AuthService', () => {
     sharedHash = await PasswordService.hash('Admin#2025');
   });
 
+  describe('login · rendimiento', () => {
+    it('migra en segundo plano un hash de otro coste sin tocar debeCambiarPassword', async () => {
+      const bcrypt = (await import('bcryptjs')).default;
+      const repo = new InMemoryAuthRepository();
+      const oldHash = await bcrypt.hash('Admin#2025', 12);
+      const row = await seedActiveAdmin(repo, oldHash);
+      const { service } = buildService(repo);
+
+      await service.login(row.email, 'Admin#2025', {});
+
+      await vi.waitFor(async () => {
+        const stored = await repo.findUserById(row.id);
+        expect(PasswordService.needsRehash(stored!.passwordHash)).toBe(false);
+        expect(await PasswordService.verify('Admin#2025', stored!.passwordHash)).toBe(true);
+      });
+    });
+
+    it('no bloquea el login si la auditoría falla', async () => {
+      const repo = new InMemoryAuthRepository();
+      const row = await seedActiveAdmin(repo, sharedHash);
+      const { service, audit } = buildService(repo);
+      audit.mockRejectedValue(new Error('BD caída'));
+
+      await expect(service.login(row.email, 'Admin#2025', {})).resolves.toBeTruthy();
+    });
+
+    it('consulta los permisos del rol una sola vez entre logins', async () => {
+      const repo = new InMemoryAuthRepository();
+      const row = await seedActiveAdmin(repo, sharedHash);
+      const spy = vi.spyOn(repo, 'getPermissionsByRole');
+      const { service } = buildService(repo);
+
+      await Promise.all([service.login(row.email, 'Admin#2025', {}), service.login(row.email, 'Admin#2025', {})]);
+      await service.login(row.email, 'Admin#2025', {});
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('login', () => {
     it('devuelve accessToken + refreshToken + principal con permisos', async () => {
       const repo = new InMemoryAuthRepository();

@@ -83,5 +83,7 @@ export interface AuthRepository {
   revokeRefreshFamilia(familia: string, tx?: Tx): Promise<void>;
   findTokensByFamilia(familia: string, tx?: Tx): Promise<RefreshTokenRecord[]>;
 
+  /** Reemplaza solo el hash (migración de coste); NO toca `debeCambiarPassword`. */
+  rehashUserPassword(userId: string, passwordHash: string, tx?: Tx): Promise<void>;
   getPermissionsByRole(roleCodigo: string, tx?: Tx): Promise<RolePermissionRow[]>;
 }
