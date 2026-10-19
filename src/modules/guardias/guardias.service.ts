@@ -318,7 +318,7 @@ export async function updateGuardia(id: string, patch: {
   }
   const data: Prisma.GuardiaUpdateInput = {
     ...(patch.primerNombre ? { primerNombre: patch.primerNombre } : {}),
-    ...(patch.segundoNombre !== undefined ? { segundoNombre: patch.segundoNombre ?? null } : {}),
+    ...(patch.segundoNombre !== undefined ? { segundoNombre: patch.segundoNombre?.trim() || null } : {}),
     ...(patch.apellidoPaterno ? { apellidoPaterno: patch.apellidoPaterno } : {}),
     ...(patch.apellidoMaterno ? { apellidoMaterno: patch.apellidoMaterno } : {}),
     ...(patch.ci ? { ci: patch.ci } : {}),
