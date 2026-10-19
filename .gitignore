@@ -60,3 +60,12 @@ Thumbs.db
 # Secretos locales de cualquier herramienta
 *.secret
 *.token
+# Paquetes de despliegue y SQL generado para cPanel (se arman en local)
+*.zip
+/deploy_cpanel*.sql
+
+# Scripts sueltos de depuración local
+/test-hecho.mjs
+
+# Herramientas de IA / editor
+.claude/
