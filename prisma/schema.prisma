@@ -670,6 +670,7 @@ model Hecho {
   estadoCambiadoPor User?       @relation("HechoEstado", fields: [estadoCambiadoPorId], references: [id], onDelete: SetNull)
   evidencias        HechoEvidencia[]
 
+  @@index([reportadoEn, nivelRiesgo], map: "ix_hecho_retencion")
   @@map("hecho")
 }
 

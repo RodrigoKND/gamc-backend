@@ -9,6 +9,7 @@ import { createApp } from './app.js';
 import { buildContainer } from './composition.js';
 import { pasadaPlanificador } from '@modules/programacion/planificador';
 import { PLANIFICADOR_INTERVALO_MS } from '@modules/programacion/config';
+import { barridoRetencionHechos, RETENCION_BARRIDO_INTERVALO_MS } from '@modules/hechos/retencion';
 
 const container = buildContainer();
 
@@ -62,11 +63,32 @@ const escalamientoSos = setInterval(() => {
 }, SOS_BARRIDO_INTERVALO_MS);
 escalamientoSos.unref();
 
+let retencion: NodeJS.Timeout | null = null;
+if (process.env.DESACTIVAR_RETENCION_HECHOS !== '1') {
+  let corriendoRetencion = false;
+  const tickRetencion = () => {
+    if (corriendoRetencion) return;
+    corriendoRetencion = true;
+    barridoRetencionHechos()
+      .then((r) => {
+        if (r.eliminados > 0) logger.info(r, 'Retención: reportes expirados eliminados');
+      })
+      .catch((err) => logger.error({ err }, 'Falló el barrido de retención de reportes'))
+      .finally(() => {
+        corriendoRetencion = false;
+      });
+  };
+  retencion = setInterval(tickRetencion, RETENCION_BARRIDO_INTERVALO_MS);
+  retencion.unref();
+  tickRetencion();
+}
+
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   if (vencimiento) clearInterval(vencimiento);
+  if (retencion) clearInterval(retencion);
   clearInterval(escalamientoSos);
   // logger.info({ signal }, 'Apagando...');
   server.close(async () => {

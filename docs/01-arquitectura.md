@@ -22,15 +22,16 @@ flowchart LR
 
     DB[("PostgreSQL<br/>Supabase")]
     OSM["Nominatim<br/>(OpenStreetMap)"]
-    R2[("Cloudflare R2<br/>fotos y videos")]
+    R2[("RustFS (S3)<br/>fotos y videos")]
 
     WEB -- "cookies httpOnly + CSRF" --> HTTP
     WEB <-- "eventos en vivo" --> WS
     APP -- "Bearer JWT" --> HTTP
     APP <-- "Bearer JWT" --> WS
     HTTP --> DB
-    HTTP -- "selfies y evidencias" --> R2
-    WEB -. "muestra archivos" .-> R2
+    HTTP -- "PutObject (red Docker)" --> R2
+    R2 -. "GetObject por /media" .-> HTTP
+    WEB -. "muestra archivos" .-> HTTP
     PLAN --> DB
     HTTP -- "geocodificación inversa<br/>(1 req/s, caché)" --> OSM
 ```
@@ -89,7 +90,7 @@ El código se organiza en cuatro capas con dependencias en un solo sentido:
 | **Presentación (HTTP)** | `modules/*/…routes.ts`, `modules/auth/http/` | Rutas Express, validación de entrada (zod), autenticación/autorización, forma de la respuesta | Aplicación, shared |
 | **Aplicación** | `modules/*/…service.ts`, `modules/auth/application/` | Casos de uso, reglas de negocio, transacciones, auditoría, publicación de eventos | Dominio, infraestructura, shared |
 | **Dominio** | `modules/auth/domain/`, funciones puras (`estadoRuta.ts`, `geometria.ts`, `ocupacion.ts`) | Contratos (repositorios), entidades y cálculos sin E/S | Nada externo |
-| **Infraestructura** | `src/infrastructure/`, `modules/auth/infrastructure/` | Prisma, Socket.io, logger, almacenamiento de archivos (Cloudflare R2) | Librerías externas |
+ | **Infraestructura** | `src/infrastructure/`, `modules/auth/infrastructure/` | Prisma, Socket.io, logger, almacenamiento de archivos (RustFS vía S3) | Librerías externas |
 
 > **Nota:** el módulo `auth` implementa el patrón completo (puertos y adaptadores, con `InMemoryAuthRepository` para pruebas). El resto de módulos usa una variante simplificada *routes + service* que accede a Prisma directamente; las funciones de cálculo críticas se mantienen puras y probadas por separado.
 
@@ -115,7 +116,7 @@ El código se organiza en cuatro capas con dependencias en un solo sentido:
 | `mandados` | `/api/mandados` | Tareas registradas por guardias | Móvil · Web |
 | `checkpoints` | `/api/checkpoints` | Marcas fotográficas de control | Móvil |
 | `patrullas` | `/api/patrullas` | Patrulla vigente del guardia | Móvil |
-| `media` | `/api/media` | Subida de fotos y videos a Cloudflare R2 | Móvil · Web |
+| `media` | `/api/media` | Subida de fotos y videos a RustFS (S3) | Móvil · Web |
 | `dashboard` | `/api/dashboard` | KPIs y series agregadas | Web |
 | `auditoria` | `/api/auditoria` | Bitácora de acciones sensibles | Web |
 
@@ -185,6 +186,6 @@ Corre en el proceso del API cada `PLANIFICADOR_INTERVALO_MS` (60 s), con protecc
 | ADR-02 | JWT de acceso corto con permisos embebidos (`perms`) | RBAC sin consultar la BD en cada request; el middleware de Next.js puede validarlo | Un cambio de permisos tarda hasta `ACCESS_TOKEN_MINUTES` en aplicarse (las conexiones WS se cierran explícitamente al cambiar la EPI) |
 | ADR-03 | Refresh opaco, hasheado (SHA-256) y rotativo por familia | Detección de reuso: un token ya rotado revoca toda la familia | Una sola sesión válida por cadena de refresh |
 | ADR-04 | Geometría propia en TypeScript, sin PostGIS | Compatible con Supabase sin extensiones; cálculos a escala de ciudad | Proyección equirectangular aproximada; suficiente para Cochabamba |
-| ADR-05 | Fotos y videos en Cloudflare R2 (API S3) con URL pública por archivo | Independiente del servidor: sobrevive a reinicios y despliegues, sin costo de egreso, CDN de Cloudflare | La BD guarda solo la URL; el nombre de cada archivo es un UUID generado por el servidor |
+| ADR-05 | Fotos y videos en RustFS (API S3) con URL `/media/<clave>` | El binario sobrevive a reinicios; el bucket queda privado en la red Docker y nginx es el único punto de entrada | La BD guarda solo la URL; el nombre de cada archivo es un UUID generado por el servidor |
 | ADR-06 | Snapshot del trazado en cada ejecución | Editar una ruta de la biblioteca no altera lo ya asignado | Duplicación controlada de geometría |
 | ADR-07 | Hora oficial `America/La_Paz` para programaciones | Bolivia no tiene horario de verano; agenda en día local | Fechas `fecha_local` tipo `date`, instantes en `timestamptz` |

@@ -51,8 +51,21 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   RESET_CODE_MINUTES: z.coerce.number().int().min(1).default(10),
 
-  // Cloudflare R2 (fotos y videos). Las cinco juntas activan R2; sin ellas
-  // los archivos van a `uploads/` (solo desarrollo local).
+  // Almacenamiento de fotos y videos compatible con S3 (RustFS en Docker).
+  // Las cinco variables S3_* juntas activan el almacenamiento remoto; sin
+  // ellas se usan las R2_* históricas y, si tampoco hay, `uploads/` (solo dev).
+  S3_ENDPOINT: opcional(z.string().url()),
+  S3_REGION: opcional(z.string()),
+  S3_ACCESS_KEY_ID: opcional(z.string()),
+  S3_SECRET_ACCESS_KEY: opcional(z.string()),
+  S3_BUCKET: opcional(z.string()),
+  // RustFS responde en path-style cuando no se configura RUSTFS_SERVER_DOMAINS.
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  // Cloudflare R2: se mantiene para no romper despliegues ya existentes.
   R2_ACCOUNT_ID: opcional(z.string()),
   R2_ACCESS_KEY_ID: opcional(z.string()),
   R2_SECRET_ACCESS_KEY: opcional(z.string()),
@@ -74,14 +87,76 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
+const S3_VARS = ['S3_ENDPOINT', 'S3_REGION', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_BUCKET'] as const;
 const R2_VARS = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'] as const;
-const r2Definidas = R2_VARS.filter((k) => env[k]);
-if (r2Definidas.length > 0 && r2Definidas.length < R2_VARS.length) {
-  console.error(`Configuración de Cloudflare R2 incompleta. Faltan: ${R2_VARS.filter((k) => !env[k]).join(', ')}`);
-  process.exit(1);
+
+/**
+ * Un único objeto de configuración para el almacenamiento de evidencias.
+ * `s3` es el destino nuevo (RustFS); `r2` conserva el contrato histórico para
+ * instalaciones ya desplegadas; `local` sigue sirviendo `uploads/` en desarrollo.
+ */
+export type AlmacenamientoMedia =
+  | { modo: 'local' }
+  | {
+      modo: 's3';
+      endpoint: string;
+      region: string;
+      accessKeyId: string;
+      secretAccessKey: string;
+      bucket: string;
+      forcePathStyle: boolean;
+    }
+  | {
+      modo: 'r2';
+      endpoint: string;
+      region: 'auto';
+      accessKeyId: string;
+      secretAccessKey: string;
+      bucket: string;
+      forcePathStyle: false;
+      publicUrl: string;
+    };
+
+function resolverAlmacenamiento(): AlmacenamientoMedia {
+  const s3Definidas = S3_VARS.filter((k) => env[k]);
+  if (s3Definidas.length > 0 && s3Definidas.length < S3_VARS.length) {
+    console.error(`Configuración de almacenamiento S3 incompleta. Faltan: ${S3_VARS.filter((k) => !env[k]).join(', ')}`);
+    process.exit(1);
+  }
+  if (s3Definidas.length === S3_VARS.length) {
+    return {
+      modo: 's3',
+      endpoint: env.S3_ENDPOINT!,
+      region: env.S3_REGION!,
+      accessKeyId: env.S3_ACCESS_KEY_ID!,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY!,
+      bucket: env.S3_BUCKET!,
+      forcePathStyle: env.S3_FORCE_PATH_STYLE,
+    };
+  }
+
+  const r2Definidas = R2_VARS.filter((k) => env[k]);
+  if (r2Definidas.length > 0 && r2Definidas.length < R2_VARS.length) {
+    console.error(`Configuración de Cloudflare R2 incompleta. Faltan: ${R2_VARS.filter((k) => !env[k]).join(', ')}`);
+    process.exit(1);
+  }
+  if (r2Definidas.length === R2_VARS.length) {
+    return {
+      modo: 'r2',
+      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      region: 'auto',
+      accessKeyId: env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
+      bucket: env.R2_BUCKET!,
+      forcePathStyle: false,
+      publicUrl: env.R2_PUBLIC_URL!,
+    };
+  }
+
+  return { modo: 'local' };
 }
 
-export const r2Configurado = r2Definidas.length === R2_VARS.length;
+export const almacenamientoMedia = resolverAlmacenamiento();
 
 export const IS_PROD = env.NODE_ENV === 'production';
 export const IS_DEV = !IS_PROD;

@@ -3,17 +3,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
 import type { S3Client } from '@aws-sdk/client-s3';
-import { env, r2Configurado } from '@config/env';
+import { almacenamientoMedia } from '@config/env';
+import { Errors } from '@shared/index';
 import { logger } from '@infra/logger';
 
 // Almacenamiento de archivos subidos (selfie de inicio de turno + evidencia
-// foto/video de un hecho). La BD solo guarda la URL pública
+// foto/video de un hecho). La BD solo guarda la URL
 // (turno.selfie_inicio_url / hecho_evidencia.url).
 //
-// · Con las variables R2_* definidas → Cloudflare R2 (API compatible con S3).
-//   El binario no toca el disco del servidor: sobrevive a reinicios y
-//   despliegues y se sirve desde el dominio público del bucket.
-// · Sin ellas (desarrollo local) → carpeta `uploads/`, servida en /media.
+// · Con S3_* (RustFS en Docker): el binario viaja al bucket por la API S3 de
+//   la red interna y se sirve por `/media/<clave>`; RustFS no se expone.
+// · Con R2_* (despliegues anteriores): se mantiene la URL pública del bucket.
+// · Sin ninguna de las dos (desarrollo local): carpeta `uploads/` en /media.
 
 export const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
@@ -24,6 +25,11 @@ export const MIME_A_EXT: Record<string, { ext: string; tipo: 'foto' | 'video' }>
   'video/mp4': { ext: '.mp4', tipo: 'video' },
   'video/quicktime': { ext: '.mov', tipo: 'video' },
 };
+
+// Solo se sirven las claves que este servidor puede generar: UUID + extensión
+// de la lista blanca, dentro de `fotos/` o `videos/`. Así `/media` nunca se
+// convierte en un lector arbitrario del bucket.
+const CLAVE_PERMITIDA = /^(fotos|videos)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|mp4|mov)$/;
 
 // Cubre una selfie + un video corto de evidencia; suficiente para el uso
 // real (una foto o un clip por request, nunca un archivo por lote).
@@ -46,30 +52,42 @@ export const upload = multer({
   },
 });
 
-// El SDK de S3 pesa y solo hace falta con R2: se importa bajo demanda para
-// que el API arranque aunque el paquete no esté instalado (almacenamiento local).
-let r2: Promise<S3Client> | null = null;
+// El SDK de S3 se importa bajo demanda: el API debe arrancar aunque el paquete
+// no esté instalado cuando se usa almacenamiento local.
+let clienteRemoto: Promise<S3Client> | null = null;
 
-function clienteR2(): Promise<S3Client> {
-  r2 ??= import('@aws-sdk/client-s3')
+function clienteS3(): Promise<S3Client> {
+  const configuracion = almacenamientoMedia;
+  if (configuracion.modo === 'local') return Promise.reject(Errors.validation('Almacenamiento remoto no configurado.'));
+
+  clienteRemoto ??= import('@aws-sdk/client-s3')
     .then(
       ({ S3Client: Client }) =>
         new Client({
-          region: 'auto',
-          endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-          credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! },
+          region: configuracion.region,
+          endpoint: configuracion.endpoint,
+          forcePathStyle: configuracion.forcePathStyle,
+          credentials: {
+            accessKeyId: configuracion.accessKeyId,
+            secretAccessKey: configuracion.secretAccessKey,
+          },
         }),
     )
     .catch((err: unknown) => {
-      r2 = null; // permite reintentar si fue un fallo transitorio
+      clienteRemoto = null; // permite reintentar si fue un fallo transitorio
       throw err;
     });
-  return r2;
+  return clienteRemoto;
 }
 
-if (!r2Configurado) {
+if (almacenamientoMedia.modo === 'local') {
   void fs.mkdir(UPLOADS_DIR, { recursive: true });
-  logger.info({ dir: UPLOADS_DIR }, 'Media: almacenamiento local (R2 no configurado)');
+  logger.info({ dir: UPLOADS_DIR }, 'Media: almacenamiento local (S3/R2 no configurado)');
+} else {
+  logger.info(
+    { modo: almacenamientoMedia.modo, bucket: almacenamientoMedia.bucket, endpoint: almacenamientoMedia.endpoint },
+    'Media: almacenamiento remoto configurado',
+  );
 }
 
 export interface ArchivoGuardado {
@@ -79,28 +97,74 @@ export interface ArchivoGuardado {
 
 /**
  * Guarda el archivo y devuelve su URL pública definitiva.
- * `origenLocal` (protocolo + host de la petición) solo se usa sin R2, para
- * que la URL funcione igual desde localhost (web) o la IP LAN (celular).
+ * `origenLocal` (protocolo + host de la petición) solo se usa en local y con
+ * RustFS: el binario se sirve por `/media`, detrás del reverse proxy.
  */
 export async function guardarArchivo(file: Express.Multer.File, origenLocal: string): Promise<ArchivoGuardado> {
   const info = MIME_A_EXT[file.mimetype]!;
   const nombre = `${randomUUID()}${info.ext}`;
 
-  if (r2Configurado) {
+  if (almacenamientoMedia.modo !== 'local') {
     const clave = `${info.tipo === 'foto' ? 'fotos' : 'videos'}/${nombre}`;
-    const [{ PutObjectCommand }, cliente] = await Promise.all([import('@aws-sdk/client-s3'), clienteR2()]);
+    const [{ PutObjectCommand }, cliente] = await Promise.all([import('@aws-sdk/client-s3'), clienteS3()]);
     await cliente.send(
       new PutObjectCommand({
-        Bucket: env.R2_BUCKET,
+        Bucket: almacenamientoMedia.bucket,
         Key: clave,
         Body: file.buffer,
         ContentType: file.mimetype,
         CacheControl: 'public, max-age=31536000, immutable',
       }),
     );
-    return { url: `${env.R2_PUBLIC_URL!.replace(/\/+$/, '')}/${clave}`, tipo: info.tipo };
+
+    if (almacenamientoMedia.modo === 'r2') {
+      return { url: `${almacenamientoMedia.publicUrl.replace(/\/+$/, '')}/${clave}`, tipo: info.tipo };
+    }
+    return { url: `${origenLocal.replace(/\/+$/, '')}/media/${clave}`, tipo: info.tipo };
   }
 
   await fs.writeFile(path.join(UPLOADS_DIR, nombre), file.buffer);
-  return { url: `${origenLocal}/media/${nombre}`, tipo: info.tipo };
+  return { url: `${origenLocal.replace(/\/+$/, '')}/media/${nombre}`, tipo: info.tipo };
+}
+
+/** Devuelve el binario de una evidencia desde el almacenamiento remoto. */
+export async function descargarArchivo(clave: string): Promise<{ bytes: Buffer; contentType?: string }> {
+  if (almacenamientoMedia.modo === 'local' || !CLAVE_PERMITIDA.test(clave)) {
+    throw Errors.notFound('Archivo no encontrado.');
+  }
+
+  const [{ GetObjectCommand }, cliente] = await Promise.all([import('@aws-sdk/client-s3'), clienteS3()]);
+  let objeto;
+  try {
+    objeto = await cliente.send(new GetObjectCommand({ Bucket: almacenamientoMedia.bucket, Key: clave }));
+  } catch (error) {
+    // Un enlace viejo o un archivo borrado es un 404, no un error del servidor.
+    if (error instanceof Error && error.name === 'NoSuchKey') throw Errors.notFound('Archivo no encontrado.');
+    throw error;
+  }
+  if (!objeto.Body) throw Errors.notFound('Archivo no encontrado.');
+
+  return { bytes: Buffer.from(await objeto.Body.transformToByteArray()), contentType: objeto.ContentType };
+}
+
+export async function eliminarArchivo(url: string): Promise<void> {
+  if (almacenamientoMedia.modo !== 's3') return;
+
+  let clave: string;
+  try {
+    const destino = new URL(url);
+    if (!destino.pathname.startsWith('/media/')) return;
+    clave = decodeURIComponent(destino.pathname.slice('/media/'.length));
+  } catch {
+    return;
+  }
+  if (!CLAVE_PERMITIDA.test(clave)) return;
+
+  const [{ DeleteObjectCommand }, cliente] = await Promise.all([import('@aws-sdk/client-s3'), clienteS3()]);
+  try {
+    await cliente.send(new DeleteObjectCommand({ Bucket: almacenamientoMedia.bucket, Key: clave }));
+  } catch (error) {
+    if (error instanceof Error && error.name === 'NoSuchKey') return;
+    throw error;
+  }
 }

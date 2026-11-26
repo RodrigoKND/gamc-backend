@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { pinoHttp } from 'pino-http';
+import { almacenamientoMedia } from '@config/env';
 import { corsOptions } from '@config/cors';
 import { errorHandler, notFoundHandler } from '@shared/errors';
 import { logger } from '@infra/logger';
@@ -19,7 +20,7 @@ import { buildTelemetryRouter } from '@modules/telemetry/telemetry.routes';
 import { buildTurnosRouter } from '@modules/turnos/turnos.routes';
 import { buildMandadosRouter } from '@modules/mandados/mandados.routes';
 import { buildPatrullasRouter } from '@modules/patrullas/patrullas.routes';
-import { buildMediaRouter } from '@modules/media/media.routes';
+import { buildMediaPublicRouter, buildMediaRouter } from '@modules/media/media.routes';
 import { UPLOADS_DIR } from '@modules/media/media.storage';
 import { buildCheckpointsRouter } from '@modules/checkpoints/checkpoints.routes';
 import { buildEpisRouter } from '@modules/epis/epis.routes';
@@ -72,12 +73,13 @@ export function createApp(c: Container): express.Express {
   app.use('/api/patrullas', buildPatrullasRouter(c.tokens));
   app.use('/api/checkpoints', buildCheckpointsRouter(c.tokens));
   app.use('/api/media', buildMediaRouter(c.tokens));
-  // Archivos guardados en disco (desarrollo sin R2, o subidos antes de
-  // activar R2). Con R2 las URLs nuevas apuntan directo al bucket.
-  app.use(
-    '/media',
-    express.static(UPLOADS_DIR, { maxAge: '365d', immutable: true }),
-  );
+  // Con RustFS el binario se lee del bucket (S3 privado). Sin almacenamiento
+  // remoto se sirve lo que ya exista en `uploads/`, como antes.
+  if (almacenamientoMedia.modo === 's3') {
+    app.use('/media', buildMediaPublicRouter());
+  } else {
+    app.use('/media', express.static(UPLOADS_DIR, { maxAge: '365d', immutable: true }));
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

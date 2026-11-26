@@ -72,7 +72,7 @@ erDiagram
 | `guardia_telemetria` | Serie GPS + SOS | `id` bigserial (se serializa como string); `es_sos`, `sos_estado`, `bateria_pct` |
 | `guardia_ubicacion_actual` | Última posición válida y EPI actual | Una fila por guardia |
 | `hecho` | Incidente | `estado`: `reportado` · `en_revision` · `cerrado`; `nivel_riesgo`; `epi_id` por ubicación |
-| `hecho_evidencia` | Fotos/videos | `tipo`: `foto` · `video`; URL pública en Cloudflare R2 |
+| `hecho_evidencia` | Fotos/videos | `tipo`: `foto` · `video`; URL `/media/<clave>` servida desde RustFS |
 | `hecho_epi_reclasificacion` | Valores anteriores de `epi_id` (0008) | Para revertir |
 | `mandado` | Tarea registrada por el guardia | Con EPI por ubicación |
 | `checkpoint` | Marca fotográfica de control | `estado`: `realizado` · `perdido` |

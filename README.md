@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | **Versión** | 1.0.0 |
-| **Stack** | Node.js ≥ 20 · TypeScript 5 (ESM) · Express 4 · Prisma 5 · PostgreSQL (Supabase) · Socket.io 4 · Cloudflare R2 |
+| **Stack** | Node.js ≥ 20 · TypeScript 5 (ESM) · Express 4 · Prisma 5 · PostgreSQL (Supabase) · Socket.io 4 · RustFS (S3) |
 | **Puerto por defecto** | `4000` (HTTP + WebSocket sobre el mismo puerto) |
 | **Base de la API** | `/api` |
 | **Estado** | En desarrollo activo — entregas F1–F7 integradas |
@@ -21,7 +21,7 @@ El sistema coordina el patrullaje municipal en tiempo real:
 - **Motor de asignación de rutas** transaccional e idempotente: rutas por calles, puntos fijos, capacidad por modalidad (coche, moto, a pie…).
 - **Estado respecto a la ruta** calculado en cada ping GPS: *incorporándose → en ruta → advertencia → alerta*, con plazo de incorporación.
 - **Programación de rutas** por días y horas con un **planificador** de servidor que abre, inicia y cierra horarios cada minuto, y **asignación automática** de los guardias libres más cercanos.
-- **Registro de hechos** (incidentes) desde la app, con evidencia foto/video almacenada en **Cloudflare R2**, clasificación territorial y tablero de KPIs.
+- **Registro de hechos** (incidentes) desde la app, con evidencia foto/video almacenada en **RustFS** (S3 autohospedado), clasificación territorial y tablero de KPIs.
 - **Segmentación territorial por EPI** (Estación Policial Integral): cada operador ve y modifica solo lo de su jurisdicción.
 - **RBAC** por rol y recurso, sesión con cookies httpOnly (web) o Bearer (móvil), CSRF de doble envío, rate limiting y bitácora de auditoría.
 
@@ -51,6 +51,17 @@ curl http://localhost:4000/api/health
 ```
 
 ¿No tienes Supabase? Levanta un PostgreSQL local con `docker compose -f compose.yaml up -d` (ver [Guía de desarrollo](docs/07-desarrollo.md#12-base-de-datos-local)).
+
+## Docker, RustFS y reverse proxy
+
+El despliegue completo de los tres proyectos (web, API y app móvil como cliente) vive en `../gamc-stack`: contiene los `Dockerfile` de este repositorio y de la web, el `compose.yaml` con RustFS y la configuración de nginx. Guía de arranque y verificación de imágenes: [../gamc-stack/README.md](../gamc-stack/README.md).
+
+Puntos clave del backend:
+
+- Con `S3_*` definidas, los archivos se escriben en RustFS y se sirven por `GET /media/<clave>`; el bucket permanece privado en la red Docker.
+- Las variables `R2_*` siguen funcionando igual para despliegues anteriores; si no hay ninguna configuración remota se mantiene el fallback a `uploads/` en desarrollo.
+- `POST /api/media` (Bearer de guardia) es el único endpoint de subida; la app móvil dejó de usar el Worker de Cloudflare.
+- Detalle de variables y contratos: [07 · Desarrollo](docs/07-desarrollo.md#13-almacenamiento-de-evidencias).
 
 ## Documentación
 

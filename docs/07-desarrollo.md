@@ -58,14 +58,18 @@ Todas las variables se validan al arranque en `src/config/env.ts`; un valor inv�
 | `CORS_ORIGINS` | `http://localhost:3000` | Orígenes web autorizados, separados por coma |
 | `DEV_RETURN_RESET_CODE` | `true` | Devuelve el código de recuperación en la respuesta (desarrollo) |
 | `RESET_CODE_MINUTES` | `10` | Vigencia del código de recuperación |
-| `R2_ACCOUNT_ID` | — | ID de la cuenta de Cloudflare |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | — | Token de API de R2 (permiso *Object Read & Write*) |
-| `R2_BUCKET` | — | Bucket donde se guardan fotos y videos |
-| `R2_PUBLIC_URL` | — | Dominio público del bucket (propio o `*.r2.dev`) |
+| `S3_ENDPOINT` | — | URL del servicio S3 (en Docker: `http://rustfs:9000`) |
+| `S3_REGION` | — | Región del servicio (`us-east-1` en RustFS) |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | — | Credenciales con permiso de lectura y escritura de objetos |
+| `S3_BUCKET` | — | Bucket donde se guardan fotos y videos |
+| `S3_FORCE_PATH_STYLE` | `true` | Necesario con RustFS cuando no se configura `RUSTFS_SERVER_DOMAINS` |
+| `R2_*` (legado) | — | Las cinco variables antiguas siguen activando Cloudflare R2 si no hay `S3_*` |
 | `LOG_LEVEL` | `info` | Nivel de log de pino |
 | `DESACTIVAR_VENCIMIENTO_RUTAS` | — | `1` apaga el planificador en esa instancia (mantenimiento) |
 
-**Archivos (fotos y videos):** con las cinco variables `R2_*` definidas, los archivos se suben a Cloudflare R2. Si se dejan todas vacías, en desarrollo se guardan en `./uploads` y se sirven en `/media`. Definir solo algunas detiene el arranque indicando cuáles faltan.
+### 1.3 Almacenamiento de evidencias
+
+Con las cinco variables `S3_*` definidas, los archivos se escriben en RustFS (o cualquier servicio S3) y se devuelve una URL `/media/<clave>` que el propio API sirve leyendo del bucket; así el almacenamiento queda privado detrás de nginx. Si solo están las cinco `R2_*` antiguas, el comportamiento es el de siempre: subida a Cloudflare R2 y URL pública del bucket. Sin ninguna configuración remota se guarda en `./uploads` y se sirve en `/media`. Definir un grupo a medias detiene el arranque indicando cuáles faltan. El despliegue completo y la verificación de objetos están en `../gamc-stack/README.md`.
 
 ## 2. Convenciones
 

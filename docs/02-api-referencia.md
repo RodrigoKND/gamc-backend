@@ -219,6 +219,8 @@ Se acepta `tipoHechoId` o `tipoCodigo`; máximo 12 evidencias. La EPI del hecho 
 
 `/exportar` devuelve `meta.truncado = true` si se alcanzó el tope interno de filas.
 
+**Retención:** los hechos se borran automáticamente según `nivelRiesgo`, contando desde `reportadoEn`: `bajo` 1 día, `medio` 15 días, `alto` y `muy_alto` 30 días. El barrido corre cada hora en el proceso del API, elimina primero las evidencias de RustFS y luego el hecho (las filas `hecho_evidencia` se borran por cascade). Las URLs históricas de otros proveedores no generan llamadas externas. Para desactivarlo en una instancia: `DESACTIVAR_RETENCION_HECHOS=1`.
+
 ---
 
 ## 7. Mapas, rutas y ejecuciones — `/mapas`
@@ -385,7 +387,7 @@ Todos con `Authorization: Bearer <accessToken>` de guardia. El `guardiaId` **sie
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/media` | Sube un archivo a Cloudflare R2 (`multipart/form-data`, campo `file`, máx. 25 MB) → `{ url, tipo: foto \| video }` |
+| POST | `/media` | Sube un archivo a RustFS (`multipart/form-data`, campo `file`, máx. 25 MB) → `{ url, tipo: foto \| video }` |
 | POST | `/turnos` | Inicia turno: `{ selfieInicioUrl, lat, lng, horaInicio?, patrullaId? }` |
 | PATCH | `/turnos/:id/cerrar` | Cierra turno: `{ lat?, lng?, horaFin? }` |
 | GET | `/turnos?limit=50` | Historial de turnos propios |
@@ -412,7 +414,7 @@ Todos con `Authorization: Bearer <accessToken>` de guardia. El `guardiaId` **sie
 
 Se rechaza si `capturadoEn` está adelantado más de **5 minutos** respecto al servidor o si `turnoId` no pertenece al guardia. Un SOS es este mismo ping con `"esSos": true`.
 
-**Flujo de subida de evidencia:** `POST /media` → usar la `url` devuelta en `POST /turnos` (`selfieInicioUrl`) o `POST /hechos` (`evidencias[].url`). Formatos admitidos: JPEG, PNG, WebP, MP4 y MOV. El servidor genera el nombre (UUID) y guarda el archivo en el bucket de R2 (`fotos/…` o `videos/…`); la URL devuelta es la definitiva y la web la muestra directamente.
+**Flujo de subida de evidencia:** `POST /media` → usar la `url` devuelta en `POST /turnos` (`selfieInicioUrl`) o `POST /hechos` (`evidencias[].url`). Formatos admitidos: JPEG, PNG, WebP, MP4 y MOV. El servidor genera el nombre (UUID) y guarda el archivo en el bucket de RustFS (`fotos/…` o `videos/…`); la URL devuelta (`/media/<clave>`) es la definitiva y la web la muestra directamente.
 
 ---
 

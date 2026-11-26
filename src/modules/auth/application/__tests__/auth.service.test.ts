@@ -58,12 +58,15 @@ describe('AuthService', () => {
 
       await service.login(row.email, 'Admin#2025', {});
 
-      await vi.waitFor(async () => {
-        const stored = await repo.findUserById(row.id);
-        expect(PasswordService.needsRehash(stored!.passwordHash)).toBe(false);
-        expect(await PasswordService.verify('Admin#2025', stored!.passwordHash)).toBe(true);
-      });
-    });
+      await vi.waitFor(
+        async () => {
+          const stored = await repo.findUserById(row.id);
+          expect(PasswordService.needsRehash(stored!.passwordHash)).toBe(false);
+          expect(await PasswordService.verify('Admin#2025', stored!.passwordHash)).toBe(true);
+        },
+        { timeout: 10000, interval: 100 },
+      );
+    }, 20000);
 
     it('no bloquea el login si la auditoría falla', async () => {
       const repo = new InMemoryAuthRepository();

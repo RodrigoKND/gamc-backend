@@ -19,7 +19,7 @@
 | Autorización | Segmentación territorial por EPI, que falla cerrado | `modules/mapas/jurisdiccion.ts` |
 | Abuso | Rate limiting en login, activación y recuperación | `express-rate-limit` |
 | Plataforma | Cabeceras seguras, CORS por lista blanca, cuerpo ≤ 1 MB | `helmet`, `config/cors.ts` |
-| Archivos | Cloudflare R2; nombre UUID generado en servidor, extensión por lista blanca de MIME, 25 MB | `media.storage.ts` |
+| Archivos | RustFS (S3 privado); nombre UUID generado en servidor, extensión por lista blanca de MIME, 25 MB | `media.storage.ts` |
 | Trazabilidad | Bitácora de acciones sensibles | `audit_log`, `logAudit()` |
 | Configuración | Validación estricta de entorno al arranque | `config/env.ts` |
 
@@ -171,7 +171,7 @@ Reglas:
 - **CORS:** solo orígenes de `CORS_ORIGINS`, con `credentials: true`. Se permiten además peticiones sin `Origin` (apps nativas, server-to-server) y esquemas `exp://` / `expo://` (Expo en desarrollo). Métodos: `GET POST PATCH DELETE OPTIONS`; headers: `Content-Type`, `x-csrf-token`, `Authorization`.
 - **Logs:** `pino-http`; los logs HTTP ocultan tokens y cookies. Nunca registrar contraseñas, hashes ni códigos.
 - **Errores:** las respuestas `500` solo devuelven un código genérico; el detalle técnico queda únicamente en el log del servidor.
-- **Archivos subidos:** solo los guardias autenticados pueden subir. El tipo se valida contra una lista blanca de MIME, el nombre lo genera el servidor (UUID, sin intervención del cliente) y el archivo se guarda en Cloudflare R2 con caché inmutable de un año.
+- **Archivos subidos:** solo los guardias autenticados pueden subir. El tipo se valida contra una lista blanca de MIME, el nombre lo genera el servidor (UUID, sin intervención del cliente) y el archivo se guarda en RustFS con caché inmutable de un año y se sirve por `/media/<clave>`; solo se aceptan claves `fotos|videos/<uuid>.<ext>`.
 
 ## 7. Auditoría
 
